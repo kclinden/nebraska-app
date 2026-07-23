@@ -9,9 +9,3 @@ variable "app_repo_branch" {
   type        = string
   default     = "main"
 }
-
-variable "github_token_parameter_name" {
-  description = "SSM SecureString parameter name containing a GitHub token with repo read access"
-  type        = string
-  default     = "/husker/github/token"
-}

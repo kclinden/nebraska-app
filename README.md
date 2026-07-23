@@ -24,21 +24,6 @@ terraform validate
 - EC2 user data now clones application code from GitHub during instance boot.
 - EC2 installs dependencies from `app/requirements.txt`.
 
-### Private Repo Access for EC2
-
-For private repositories, store a GitHub token in SSM Parameter Store as a SecureString.
-
-```bash
-aws ssm put-parameter \
-	--region us-east-1 \
-	--name /husker/github/token \
-	--type SecureString \
-	--overwrite \
-	--value "YOUR_GITHUB_TOKEN"
-```
-
-The EC2 instance reads this parameter at runtime and uses it for git clone/pull.
-
 ## Update App Code Without Terraform Redeploy
 
 After pushing app changes to GitHub, run:

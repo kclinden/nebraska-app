@@ -3,7 +3,6 @@ set -euxo pipefail
 
 REPO_URL="${repo_url}"
 REPO_BRANCH="${repo_branch}"
-TOKEN_PARAM="${github_token_parameter_name}"
 
 APP_BASE="/opt/husker-app"
 APP_REPO_DIR="$APP_BASE/repo"
@@ -12,29 +11,13 @@ VENV_DIR="$APP_BASE/venv"
 # 1. System updates and dependencies
 if command -v dnf >/dev/null 2>&1; then
   dnf update -y
-  dnf install -y python3 python3-pip python3-virtualenv nginx git awscli
+  dnf install -y python3 python3-pip python3-virtualenv nginx git
 else
   yum update -y
-  yum install -y python3 python3-pip nginx git awscli
+  yum install -y python3 python3-pip nginx git
 fi
 
 mkdir -p "$APP_BASE"
-
-build_clone_url() {
-  local repo_url="$1"
-  local token_param="$2"
-  local token=""
-
-  token=$(aws ssm get-parameter --name "$token_param" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || true)
-
-  if [[ -n "$token" && "$repo_url" =~ ^https://github.com/ ]]; then
-    echo "$repo_url" | sed "s#https://github.com/#https://x-access-token:$token@github.com/#"
-  else
-    echo "$repo_url"
-  fi
-}
-
-CLONE_URL="$(build_clone_url "$REPO_URL" "$TOKEN_PARAM")"
 
 # 2. Clone or refresh application source from GitHub
 if [[ -d "$APP_REPO_DIR/.git" ]]; then
@@ -43,7 +26,7 @@ if [[ -d "$APP_REPO_DIR/.git" ]]; then
   git -C "$APP_REPO_DIR" pull --ff-only origin "$REPO_BRANCH"
 else
   rm -rf "$APP_REPO_DIR"
-  git clone --branch "$REPO_BRANCH" "$CLONE_URL" "$APP_REPO_DIR"
+  git clone --branch "$REPO_BRANCH" "$REPO_URL" "$APP_REPO_DIR"
 fi
 
 # 3. Create venv and install dependencies from repo source
@@ -78,35 +61,17 @@ set -euxo pipefail
 
 REPO_URL="${repo_url}"
 REPO_BRANCH="${repo_branch}"
-TOKEN_PARAM="${github_token_parameter_name}"
 APP_BASE="/opt/husker-app"
 APP_REPO_DIR="$APP_BASE/repo"
 VENV_DIR="$APP_BASE/venv"
 
-build_clone_url() {
-  local repo_url="$1"
-  local token_param="$2"
-  local token=""
-
-  token=$(aws ssm get-parameter --name "$token_param" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || true)
-
-  if [[ -n "$token" && "$repo_url" =~ ^https://github.com/ ]]; then
-    echo "$repo_url" | sed "s#https://github.com/#https://x-access-token:$token@github.com/#"
-  else
-    echo "$repo_url"
-  fi
-}
-
-CLONE_URL="$(build_clone_url "$REPO_URL" "$TOKEN_PARAM")"
-
 if [[ -d "$APP_REPO_DIR/.git" ]]; then
-  # Set URL each run so token rotation does not require host changes.
-  git -C "$APP_REPO_DIR" remote set-url origin "$CLONE_URL"
+  git -C "$APP_REPO_DIR" remote set-url origin "$REPO_URL"
   git -C "$APP_REPO_DIR" fetch origin "$REPO_BRANCH"
   git -C "$APP_REPO_DIR" checkout "$REPO_BRANCH"
   git -C "$APP_REPO_DIR" pull --ff-only origin "$REPO_BRANCH"
 else
-  git clone --branch "$REPO_BRANCH" "$CLONE_URL" "$APP_REPO_DIR"
+  git clone --branch "$REPO_BRANCH" "$REPO_URL" "$APP_REPO_DIR"
 fi
 
 source "$VENV_DIR/bin/activate"

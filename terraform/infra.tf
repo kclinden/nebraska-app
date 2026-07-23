@@ -56,9 +56,8 @@ resource "aws_instance" "web" {
 
   # Render user data with repo and auth settings
   user_data = templatefile("${path.module}/user_data.sh.tftpl", {
-    repo_url                    = var.app_repo_url
-    repo_branch                 = var.app_repo_branch
-    github_token_parameter_name = var.github_token_parameter_name
+    repo_url    = var.app_repo_url
+    repo_branch = var.app_repo_branch
   })
 
   # Ensure the instance replaces when you modify user_data
