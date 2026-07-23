@@ -138,6 +138,9 @@ HTML_TEMPLATE = """
         const scheduleTab = document.getElementById('scheduleTab');
         const rosterPanel = document.getElementById('rosterPanel');
         const schedulePanel = document.getElementById('schedulePanel');
+        const playBtn = document.getElementById('playBtn');
+        let activePlayback = null;
+        let playbackState = 'idle';
 
         function activateTab(tabName) {
             const showRoster = tabName === 'roster';
@@ -150,16 +153,16 @@ HTML_TEMPLATE = """
         rosterTab.addEventListener('click', () => activateTab('roster'));
         scheduleTab.addEventListener('click', () => activateTab('schedule'));
 
-        const playBtn = document.getElementById('playBtn');
-        let activePlayback = null;
-
         playBtn.addEventListener('click', async () => {
-            if (activePlayback) {
+            if (playbackState === 'starting' || playbackState === 'playing') {
                 activePlayback.stop();
                 activePlayback = null;
+                playbackState = 'idle';
                 playBtn.textContent = 'Play Hail Varsity';
                 return;
             }
+
+            playbackState = 'starting';
 
             const AudioContext = window.AudioContext || window.webkitAudioContext;
             const ctx = new AudioContext();
@@ -273,8 +276,12 @@ HTML_TEMPLATE = """
             const songEndAt = Math.max(endLeadA, endLeadB, endBass);
 
             playBtn.textContent = 'Stop Hail Varsity';
+            playbackState = 'playing';
 
             const stop = () => {
+                if (playbackState === 'idle') {
+                    return;
+                }
                 const now = ctx.currentTime;
                 activeNodes.forEach(({ osc, gain }) => {
                     try {
@@ -288,6 +295,9 @@ HTML_TEMPLATE = """
                 setTimeout(() => {
                     ctx.close().catch(() => {});
                 }, 120);
+                playbackState = 'idle';
+                activePlayback = null;
+                playBtn.textContent = 'Play Hail Varsity';
             };
 
             activePlayback = { stop };
@@ -296,6 +306,7 @@ HTML_TEMPLATE = """
             setTimeout(() => {
                 if (activePlayback && activePlayback.stop === stop) {
                     activePlayback = null;
+                    playbackState = 'idle';
                     playBtn.textContent = 'Play Hail Varsity';
                     ctx.close().catch(() => {});
                 }
