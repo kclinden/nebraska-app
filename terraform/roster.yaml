@@ -1,0 +1,28 @@
+players:
+  - jersey: 2
+    name: Jacory Barney Jr.
+    position: WR
+  - jersey: 4
+    name: Isaac Gifford
+    position: DB
+  - jersey: 5
+    name: Riley Van Poppel
+    position: DT
+  - jersey: 10
+    name: Anthony Colandrea
+    position: QB
+  - jersey: 12
+    name: Daniel Kaelin
+    position: QB
+  - jersey: 14
+    name: TJ Lateef
+    position: QB
+  - jersey: 15
+    name: Dylan Raiola
+    position: QB
+  - jersey: 21
+    name: Emmett Johnson
+    position: RB
+  - jersey: 23
+    name: Caleb Benning
+    position: S
