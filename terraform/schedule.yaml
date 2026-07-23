@@ -1,0 +1,61 @@
+games:
+  - game_id: 1
+    date: "2026-08-29"
+    opponent: Cincinnati
+    location: Lincoln, NE
+    home: true
+  - game_id: 2
+    date: "2026-09-05"
+    opponent: Colorado
+    location: Boulder, CO
+    home: false
+  - game_id: 3
+    date: "2026-09-12"
+    opponent: Northern Illinois
+    location: Lincoln, NE
+    home: true
+  - game_id: 4
+    date: "2026-09-19"
+    opponent: Rutgers
+    location: Lincoln, NE
+    home: true
+  - game_id: 5
+    date: "2026-09-26"
+    opponent: Purdue
+    location: West Lafayette, IN
+    home: false
+  - game_id: 6
+    date: "2026-10-03"
+    opponent: Michigan
+    location: Lincoln, NE
+    home: true
+  - game_id: 7
+    date: "2026-10-10"
+    opponent: Minnesota
+    location: Minneapolis, MN
+    home: false
+  - game_id: 8
+    date: "2026-10-24"
+    opponent: UCLA
+    location: Lincoln, NE
+    home: true
+  - game_id: 9
+    date: "2026-10-31"
+    opponent: USC
+    location: Los Angeles, CA
+    home: false
+  - game_id: 10
+    date: "2026-11-07"
+    opponent: Iowa
+    location: Lincoln, NE
+    home: true
+  - game_id: 11
+    date: "2026-11-14"
+    opponent: Michigan State
+    location: East Lansing, MI
+    home: false
+  - game_id: 12
+    date: "2026-11-28"
+    opponent: Wisconsin
+    location: Madison, WI
+    home: false

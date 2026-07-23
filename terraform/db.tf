@@ -4,9 +4,11 @@ provider "aws" {
 
 # 1. Read and decode the YAML file
 locals {
-  roster_data = yamldecode(file("${path.module}/roster.yaml"))
+  roster_data   = yamldecode(file("${path.module}/roster.yaml"))
+  schedule_data = yamldecode(file("${path.module}/schedule.yaml"))
   # Convert the list to a map with the jersey number as the unique key for for_each
-  players_map = { for player in local.roster_data.players : tostring(player.jersey) => player }
+  players_map  = { for player in local.roster_data.players : tostring(player.jersey) => player }
+  schedule_map = { for game in local.schedule_data.games : tostring(game.game_id) => game }
 }
 
 # 2. Define the DynamoDB Table
@@ -36,6 +38,30 @@ resource "aws_dynamodb_table" "nebraska_players" {
   }
 }
 
+resource "aws_dynamodb_table" "nebraska_schedule_2026" {
+  name         = "NebraskaSchedule2026"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "GameId"
+
+  attribute {
+    name = "GameId"
+    type = "N"
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+
+  tags = {
+    Environment = "Testing"
+    Application = "Husker-Roster-App"
+  }
+}
+
 # 3. Loop over the YAML map and create DynamoDB items dynamically
 resource "aws_dynamodb_table_item" "roster_items" {
   for_each = local.players_map
@@ -47,5 +73,20 @@ resource "aws_dynamodb_table_item" "roster_items" {
     "JerseyNumber" : { "N" : tostring(each.value.jersey) },
     "Name" : { "S" : each.value.name },
     "Position" : { "S" : each.value.position }
+  })
+}
+
+resource "aws_dynamodb_table_item" "schedule_items" {
+  for_each = local.schedule_map
+
+  table_name = aws_dynamodb_table.nebraska_schedule_2026.name
+  hash_key   = aws_dynamodb_table.nebraska_schedule_2026.hash_key
+
+  item = jsonencode({
+    "GameId" : { "N" : tostring(each.value.game_id) },
+    "Date" : { "S" : each.value.date },
+    "Opponent" : { "S" : each.value.opponent },
+    "Location" : { "S" : each.value.location },
+    "Home" : { "BOOL" : each.value.home }
   })
 }

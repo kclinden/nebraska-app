@@ -40,7 +40,10 @@ resource "aws_iam_policy" "dynamodb_rw_policy" {
           "dynamodb:PutItem",
           "dynamodb:DeleteItem"
         ]
-        Resource = "arn:aws:dynamodb:us-east-1:970547350603:table/NebraskaPlayers"
+        Resource = [
+          "arn:aws:dynamodb:us-east-1:970547350603:table/NebraskaPlayers",
+          "arn:aws:dynamodb:us-east-1:970547350603:table/NebraskaSchedule2026"
+        ]
       }
     ]
   })
