@@ -83,6 +83,7 @@ HTML_TEMPLATE = """
                     <td>
                         <form action="/delete" method="POST" style="display:inline;">
                             <input type="hidden" name="jersey" value="{{ player.JerseyNumber }}">
+                            <input type="hidden" name="name" value="{{ player.Name }}">
                             <button type="submit" class="delete-btn">Remove</button>
                         </form>
                     </td>
@@ -265,7 +266,7 @@ def index():
     try:
         players_response = players_table.scan()
         players = players_response.get("Items", [])
-        players = sorted(players, key=lambda x: int(x["JerseyNumber"]))
+        players = sorted(players, key=lambda x: (int(x["JerseyNumber"]), x["Name"]))
 
         schedule_response = schedule_table.scan()
         schedule = schedule_response.get("Items", [])
@@ -286,6 +287,7 @@ def add_player():
         players_table.put_item(
             Item={
                 "JerseyNumber": int(jersey),
+                "PlayerName": name,
                 "Name": name,
                 "Position": position,
             }
@@ -296,8 +298,9 @@ def add_player():
 @app.route("/delete", methods=["POST"])
 def delete_player():
     jersey = request.form.get("jersey")
-    if jersey:
-        players_table.delete_item(Key={"JerseyNumber": int(jersey)})
+    name = request.form.get("name")
+    if jersey and name:
+        players_table.delete_item(Key={"JerseyNumber": int(jersey), "PlayerName": name})
     return redirect(url_for("index"))
 
 
