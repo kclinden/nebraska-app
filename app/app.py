@@ -150,9 +150,46 @@ HTML_TEMPLATE = """
         rosterTab.addEventListener('click', () => activateTab('roster'));
         scheduleTab.addEventListener('click', () => activateTab('schedule'));
 
-        document.getElementById('playBtn').addEventListener('click', () => {
+        const playBtn = document.getElementById('playBtn');
+        let activePlayback = null;
+
+        playBtn.addEventListener('click', async () => {
+            if (activePlayback) {
+                activePlayback.stop();
+                return;
+            }
+
             const AudioContext = window.AudioContext || window.webkitAudioContext;
             const ctx = new AudioContext();
+            await ctx.resume();
+
+            const activeNodes = [];
+            let stopped = false;
+
+            const stopPlayback = () => {
+                if (stopped) {
+                    return;
+                }
+                stopped = true;
+                const now = ctx.currentTime;
+                activeNodes.forEach(({ osc, gain }) => {
+                    try {
+                        gain.gain.cancelScheduledValues(now);
+                        gain.gain.setTargetAtTime(0.0001, now, 0.02);
+                        osc.stop(now + 0.05);
+                    } catch (e) {
+                        // Node may already be stopped.
+                    }
+                });
+                activePlayback = null;
+                playBtn.textContent = 'Play Hail Varsity';
+                setTimeout(() => {
+                    ctx.close().catch(() => {});
+                }, 120);
+            };
+
+            activePlayback = { stop: stopPlayback };
+            playBtn.textContent = 'Stop Hail Varsity';
 
             const tempo = 118;
             const beat = 60 / tempo;
@@ -246,14 +283,25 @@ HTML_TEMPLATE = """
 
                     osc.start(t);
                     osc.stop(stopAt + 0.01);
+                    activeNodes.push({ osc, gain });
                     t += dur;
                 });
+
+                return t;
             }
 
             const startAt = ctx.currentTime + 0.08;
-            scheduleVoice(lead, 'triangle', 0.085, startAt, -4);
-            scheduleVoice(lead, 'sine', 0.04, startAt, 4);
-            scheduleVoice(bass, 'square', 0.03, startAt, 0);
+            const endLeadA = scheduleVoice(lead, 'triangle', 0.085, startAt, -4);
+            const endLeadB = scheduleVoice(lead, 'sine', 0.04, startAt, 4);
+            const endBass = scheduleVoice(bass, 'square', 0.03, startAt, 0);
+            const songEndAt = Math.max(endLeadA, endLeadB, endBass);
+
+            const msUntilDone = Math.max((songEndAt - ctx.currentTime) * 1000 + 200, 0);
+            setTimeout(() => {
+                if (activePlayback && activePlayback.stop === stopPlayback) {
+                    stopPlayback();
+                }
+            }, msUntilDone);
         });
     </script>
 </body>
