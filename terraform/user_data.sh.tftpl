@@ -1,0 +1,177 @@
+#!/bin/bash
+set -euxo pipefail
+
+REPO_URL="${repo_url}"
+REPO_BRANCH="${repo_branch}"
+TOKEN_PARAM="${github_token_parameter_name}"
+
+APP_BASE="/opt/husker-app"
+APP_REPO_DIR="$APP_BASE/repo"
+VENV_DIR="$APP_BASE/venv"
+
+# 1. System updates and dependencies
+if command -v dnf >/dev/null 2>&1; then
+  dnf update -y
+  dnf install -y python3 python3-pip python3-virtualenv nginx git awscli
+else
+  yum update -y
+  yum install -y python3 python3-pip nginx git awscli
+fi
+
+mkdir -p "$APP_BASE"
+
+build_clone_url() {
+  local repo_url="$1"
+  local token_param="$2"
+  local token=""
+
+  token=$(aws ssm get-parameter --name "$token_param" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || true)
+
+  if [[ -n "$token" && "$repo_url" =~ ^https://github.com/ ]]; then
+    echo "$repo_url" | sed "s#https://github.com/#https://x-access-token:$token@github.com/#"
+  else
+    echo "$repo_url"
+  fi
+}
+
+CLONE_URL="$(build_clone_url "$REPO_URL" "$TOKEN_PARAM")"
+
+# 2. Clone or refresh application source from GitHub
+if [[ -d "$APP_REPO_DIR/.git" ]]; then
+  git -C "$APP_REPO_DIR" fetch origin "$REPO_BRANCH"
+  git -C "$APP_REPO_DIR" checkout "$REPO_BRANCH"
+  git -C "$APP_REPO_DIR" pull --ff-only origin "$REPO_BRANCH"
+else
+  rm -rf "$APP_REPO_DIR"
+  git clone --branch "$REPO_BRANCH" "$CLONE_URL" "$APP_REPO_DIR"
+fi
+
+# 3. Create venv and install dependencies from repo source
+python3 -m venv "$VENV_DIR"
+source "$VENV_DIR/bin/activate"
+pip install --upgrade pip
+pip install -r "$APP_REPO_DIR/app/requirements.txt"
+
+# 4. Systemd service points at source in /opt/husker-app/repo/app
+cat << 'EOF' > /etc/systemd/system/husker-app.service
+[Unit]
+Description=Gunicorn instance to serve Husker App
+After=network.target
+
+[Service]
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/opt/husker-app/repo/app
+Environment="PATH=/opt/husker-app/venv/bin"
+ExecStart=/opt/husker-app/venv/bin/gunicorn -w 4 -b 127.0.0.1:5000 app:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 5. On-instance updater for no-redeploy code updates
+cat << 'EOF' > /usr/local/bin/update-husker-app
+#!/bin/bash
+set -euxo pipefail
+
+REPO_URL="${repo_url}"
+REPO_BRANCH="${repo_branch}"
+TOKEN_PARAM="${github_token_parameter_name}"
+APP_BASE="/opt/husker-app"
+APP_REPO_DIR="$APP_BASE/repo"
+VENV_DIR="$APP_BASE/venv"
+
+build_clone_url() {
+  local repo_url="$1"
+  local token_param="$2"
+  local token=""
+
+  token=$(aws ssm get-parameter --name "$token_param" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || true)
+
+  if [[ -n "$token" && "$repo_url" =~ ^https://github.com/ ]]; then
+    echo "$repo_url" | sed "s#https://github.com/#https://x-access-token:$token@github.com/#"
+  else
+    echo "$repo_url"
+  fi
+}
+
+CLONE_URL="$(build_clone_url "$REPO_URL" "$TOKEN_PARAM")"
+
+if [[ -d "$APP_REPO_DIR/.git" ]]; then
+  # Set URL each run so token rotation does not require host changes.
+  git -C "$APP_REPO_DIR" remote set-url origin "$CLONE_URL"
+  git -C "$APP_REPO_DIR" fetch origin "$REPO_BRANCH"
+  git -C "$APP_REPO_DIR" checkout "$REPO_BRANCH"
+  git -C "$APP_REPO_DIR" pull --ff-only origin "$REPO_BRANCH"
+else
+  git clone --branch "$REPO_BRANCH" "$CLONE_URL" "$APP_REPO_DIR"
+fi
+
+source "$VENV_DIR/bin/activate"
+pip install -r "$APP_REPO_DIR/app/requirements.txt"
+systemctl daemon-reload
+systemctl restart husker-app
+systemctl restart nginx
+EOF
+chmod +x /usr/local/bin/update-husker-app
+
+# Ensure ec2-user can read app files
+chown -R ec2-user:ec2-user "$APP_BASE"
+
+# 6. Nginx proxy config
+rm -f /etc/nginx/nginx.conf
+cat << 'EOF' > /etc/nginx/nginx.conf
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log notice;
+pid /run/nginx.pid;
+
+include /usr/share/nginx/modules/*.conf;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log  /var/log/nginx/access.log  main;
+
+    sendfile            on;
+    tcp_nopush          on;
+    keepalive_timeout   65;
+    types_hash_max_size 4096;
+
+    include             /etc/nginx/mime.types;
+    default_type        application/octet-stream;
+
+    include /etc/nginx/conf.d/*.conf;
+}
+EOF
+
+cat << 'EOF' > /etc/nginx/conf.d/husker_app.conf
+server {
+    listen 80;
+    server_name _;
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+EOF
+
+# 7. Start services
+setsebool -P httpd_can_network_connect 1
+systemctl daemon-reload
+systemctl enable husker-app
+systemctl start husker-app
+systemctl enable nginx
+systemctl restart nginx

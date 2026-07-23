@@ -1,23 +1,9 @@
-#!/bin/bash
-# 1. System Updates and Dependencies
-dnf update -y
-dnf install python3 python3-pip nginx -y
-
-# 2. Setup App Directory and Virtual Environment
-mkdir -p /opt/husker-app
-cd /opt/husker-app
-python3 -m venv venv
-source venv/bin/activate
-pip install flask boto3 gunicorn
-
-# 3. Create the Flask Application with Add/Remove and 8-Bit Audio features
-cat << 'EOF' > app.py
 from flask import Flask, render_template_string, request, redirect, url_for
 import boto3
 
 app = Flask(__name__)
-dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
-table = dynamodb.Table('NebraskaPlayers')
+dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+table = dynamodb.Table("NebraskaPlayers")
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -39,8 +25,7 @@ HTML_TEMPLATE = """
         button:hover { background-color: #b31227; }
         .delete-btn { background-color: #555; padding: 5px 10px; font-size: 12px; }
         .delete-btn:hover { background-color: #333; }
-        
-        /* Retro 8-Bit Audio Button */
+
         #playBtn {
             background-color: #000;
             color: #0f0;
@@ -56,10 +41,10 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <h1>🌽 Nebraska Football Roster 🏈</h1>
-        
-        <button id="playBtn">🎵 Play 8-Bit Hail Varsity</button>
-        
+        <h1>Nebraska Football Roster</h1>
+
+        <button id="playBtn">Play 8-Bit Hail Varsity</button>
+
         <table>
             <tr>
                 <th>Jersey #</th>
@@ -106,37 +91,36 @@ HTML_TEMPLATE = """
         document.getElementById('playBtn').addEventListener('click', () => {
             const AudioContext = window.AudioContext || window.webkitAudioContext;
             const ctx = new AudioContext();
-            
-            // Frequencies and timing (in ms) for the basic "Hail to the team" melody line
+
             const notes = [
-                { f: 392.00, d: 250 }, 
-                { f: 523.25, d: 500 }, 
-                { f: 523.25, d: 250 }, 
-                { f: 523.25, d: 500 }, 
-                { f: 392.00, d: 250 }, 
-                { f: 523.25, d: 500 }, 
-                { f: 523.25, d: 250 }, 
-                { f: 523.25, d: 500 }  
+                { f: 392.00, d: 250 },
+                { f: 523.25, d: 500 },
+                { f: 523.25, d: 250 },
+                { f: 523.25, d: 500 },
+                { f: 392.00, d: 250 },
+                { f: 523.25, d: 500 },
+                { f: 523.25, d: 250 },
+                { f: 523.25, d: 500 }
             ];
-            
+
             let time = ctx.currentTime;
             notes.forEach(note => {
                 const osc = ctx.createOscillator();
                 const gain = ctx.createGain();
-                
-                osc.type = 'square'; // Classic retro chip square wave
+
+                osc.type = 'square';
                 osc.frequency.value = note.f;
-                
+
                 osc.connect(gain);
                 gain.connect(ctx.destination);
-                
+
                 osc.start(time);
                 osc.stop(time + note.d / 1000);
-                
+
                 gain.gain.setValueAtTime(0.05, time);
                 gain.gain.exponentialRampToValueAtTime(0.001, time + note.d / 1000);
-                
-                time += note.d / 1000 + 0.05; 
+
+                time += note.d / 1000 + 0.05;
             });
         });
     </script>
@@ -144,116 +128,42 @@ HTML_TEMPLATE = """
 </html>
 """
 
-@app.route('/')
+
+@app.route("/")
 def index():
     try:
         response = table.scan()
-        players = response.get('Items', [])
-        players = sorted(players, key=lambda x: int(x['JerseyNumber']))
+        players = response.get("Items", [])
+        players = sorted(players, key=lambda x: int(x["JerseyNumber"]))
         return render_template_string(HTML_TEMPLATE, players=players)
-    except Exception as e:
-        return f"Error connecting to DynamoDB: {str(e)}", 500
+    except Exception as exc:
+        return f"Error connecting to DynamoDB: {exc}", 500
 
-@app.route('/add', methods=['POST'])
+
+@app.route("/add", methods=["POST"])
 def add_player():
-    jersey = request.form.get('jersey')
-    name = request.form.get('name')
-    position = request.form.get('position')
-    
+    jersey = request.form.get("jersey")
+    name = request.form.get("name")
+    position = request.form.get("position")
+
     if jersey and name and position:
-        table.put_item(Item={
-            'JerseyNumber': int(jersey),
-            'Name': name,
-            'Position': position
-        })
-    return redirect(url_for('index'))
+        table.put_item(
+            Item={
+                "JerseyNumber": int(jersey),
+                "Name": name,
+                "Position": position,
+            }
+        )
+    return redirect(url_for("index"))
 
-@app.route('/delete', methods=['POST'])
+
+@app.route("/delete", methods=["POST"])
 def delete_player():
-    jersey = request.form.get('jersey')
+    jersey = request.form.get("jersey")
     if jersey:
-        table.delete_item(Key={'JerseyNumber': int(jersey)})
-    return redirect(url_for('index'))
-EOF
+        table.delete_item(Key={"JerseyNumber": int(jersey)})
+    return redirect(url_for("index"))
 
-# 4. Create a Systemd Service for the Flask App
-cat << 'EOF' > /etc/systemd/system/husker-app.service
-[Unit]
-Description=Gunicorn instance to serve Husker App
-After=network.target
 
-[Service]
-User=ec2-user
-Group=ec2-user
-WorkingDirectory=/opt/husker-app
-Environment="PATH=/opt/husker-app/venv/bin"
-ExecStart=/opt/husker-app/venv/bin/gunicorn -w 4 -b 127.0.0.1:5000 app:app
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Fix permissions
-chown -R ec2-user:ec2-user /opt/husker-app
-
-# Start the Flask app service
-systemctl start husker-app
-systemctl enable husker-app
-
-# 5. Clean & Rebuild Nginx Main Configuration File
-rm -f /etc/nginx/nginx.conf
-
-cat << 'EOF' > /etc/nginx/nginx.conf
-user nginx;
-worker_processes auto;
-error_log /var/log/nginx/error.log notice;
-pid /run/nginx.pid;
-
-include /usr/share/nginx/modules/*.conf;
-
-events {
-    worker_connections 1024;
-}
-
-http {
-    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
-                      '$status $body_bytes_sent "$http_referer" '
-                      '"$http_user_agent" "$http_x_forwarded_for"';
-
-    access_log  /var/log/nginx/access.log  main;
-
-    sendfile            on;
-    tcp_nopush          on;
-    keepalive_timeout   65;
-    types_hash_max_size 4096;
-
-    include             /etc/nginx/mime.types;
-    default_type        application/octet-stream;
-
-    include /etc/nginx/conf.d/*.conf;
-}
-EOF
-
-# Create your custom proxy config
-cat << 'EOF' > /etc/nginx/conf.d/husker_app.conf
-server {
-    listen 80;
-    server_name _;
-
-    location / {
-        proxy_pass http://127.0.0.1:5000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-EOF
-
-# 6. Adjust SELinux and Start Nginx cleanly
-setsebool -P httpd_can_network_connect 1
-systemctl start nginx
-systemctl enable nginx
-systemctl daemon-reload
-systemctl restart husker-app
-systemctl restart nginx
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)

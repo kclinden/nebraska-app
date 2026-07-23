@@ -54,8 +54,12 @@ resource "aws_instance" "web" {
   #auto assign public IP
   associate_public_ip_address = true
 
-  # Load the bash script created earlier
-  user_data = file("${path.module}/user_data.sh")
+  # Render user data with repo and auth settings
+  user_data = templatefile("${path.module}/user_data.sh.tftpl", {
+    repo_url                    = var.app_repo_url
+    repo_branch                 = var.app_repo_branch
+    github_token_parameter_name = var.github_token_parameter_name
+  })
 
   # Ensure the instance replaces when you modify user_data
   user_data_replace_on_change = true
