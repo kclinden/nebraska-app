@@ -20,7 +20,7 @@ COMMAND_ID=$(aws ssm send-command \
   --instance-ids "$INSTANCE_ID" \
   --document-name "AWS-RunShellScript" \
   --comment "Update Husker app source from GitHub" \
-  --parameters commands='["sudo /usr/local/bin/update-husker-app"]' \
+  --parameters commands='["sudo git config --global --add safe.directory /opt/husker-app/repo || true","sudo /usr/local/bin/update-husker-app"]' \
   --query 'Command.CommandId' \
   --output text)
 

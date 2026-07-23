@@ -65,17 +65,20 @@ APP_BASE="/opt/husker-app"
 APP_REPO_DIR="$APP_BASE/repo"
 VENV_DIR="$APP_BASE/venv"
 
+run_as_app_user() {
+  sudo -u ec2-user -H "$@"
+}
+
 if [[ -d "$APP_REPO_DIR/.git" ]]; then
-  git -C "$APP_REPO_DIR" remote set-url origin "$REPO_URL"
-  git -C "$APP_REPO_DIR" fetch origin "$REPO_BRANCH"
-  git -C "$APP_REPO_DIR" checkout "$REPO_BRANCH"
-  git -C "$APP_REPO_DIR" pull --ff-only origin "$REPO_BRANCH"
+  run_as_app_user git -C "$APP_REPO_DIR" remote set-url origin "$REPO_URL"
+  run_as_app_user git -C "$APP_REPO_DIR" fetch origin "$REPO_BRANCH"
+  run_as_app_user git -C "$APP_REPO_DIR" checkout "$REPO_BRANCH"
+  run_as_app_user git -C "$APP_REPO_DIR" pull --ff-only origin "$REPO_BRANCH"
 else
-  git clone --branch "$REPO_BRANCH" "$REPO_URL" "$APP_REPO_DIR"
+  run_as_app_user git clone --branch "$REPO_BRANCH" "$REPO_URL" "$APP_REPO_DIR"
 fi
 
-source "$VENV_DIR/bin/activate"
-pip install -r "$APP_REPO_DIR/app/requirements.txt"
+run_as_app_user bash -lc "source '$VENV_DIR/bin/activate' && pip install -r '$APP_REPO_DIR/app/requirements.txt'"
 systemctl daemon-reload
 systemctl restart husker-app
 systemctl restart nginx
