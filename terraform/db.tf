@@ -6,8 +6,11 @@ provider "aws" {
 locals {
   roster_data   = yamldecode(file("${path.module}/roster.yaml"))
   schedule_data = yamldecode(file("${path.module}/schedule.yaml"))
-  # Convert the list to a map with the jersey number as the unique key for for_each
-  players_map  = { for player in local.roster_data.players : tostring(player.jersey) => player }
+  # Use a stable unique key for for_each while still allowing duplicate jersey numbers.
+  players_map = {
+    for idx, player in local.roster_data.players :
+    format("%03d-%s-%03d", player.jersey, replace(lower(player.name), " ", "-"), idx) => player
+  }
   schedule_map = { for game in local.schedule_data.games : tostring(game.game_id) => game }
 }
 
@@ -16,10 +19,16 @@ resource "aws_dynamodb_table" "nebraska_players" {
   name         = "NebraskaPlayers"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "JerseyNumber"
+  range_key    = "PlayerName"
 
   attribute {
     name = "JerseyNumber"
     type = "N"
+  }
+
+  attribute {
+    name = "PlayerName"
+    type = "S"
   }
 
   # Backups: Enable Point-in-Time Recovery (Required by Wiz/Compliance)
@@ -68,9 +77,11 @@ resource "aws_dynamodb_table_item" "roster_items" {
 
   table_name = aws_dynamodb_table.nebraska_players.name
   hash_key   = aws_dynamodb_table.nebraska_players.hash_key
+  range_key  = aws_dynamodb_table.nebraska_players.range_key
 
   item = jsonencode({
     "JerseyNumber" : { "N" : tostring(each.value.jersey) },
+    "PlayerName" : { "S" : each.value.name },
     "Name" : { "S" : each.value.name },
     "Position" : { "S" : each.value.position }
   })

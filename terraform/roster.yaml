@@ -3,26 +3,335 @@ players:
     name: Jacory Barney Jr.
     position: WR
   - jersey: 4
-    name: Isaac Gifford
-    position: DB
+    name: Janiran Bonner
+    position: WR
   - jersey: 5
     name: Riley Van Poppel
     position: DT
+  - jersey: 9
+    name: Vincent Shavers Jr.
+    position: LB
   - jersey: 10
     name: Anthony Colandrea
     position: QB
+  - jersey: 10
+    name: Andrew Marshall
+    position: CB
+  - jersey: 11
+    name: Cameron Lenhardt
+    position: DE
+  - jersey: 11
+    name: Demitrius Bell
+    position: WR
+  - jersey: 11
+    name: Kwazi Gilmer
+    position: WR
   - jersey: 12
     name: Daniel Kaelin
     position: QB
+  - jersey: 12
+    name: Justyn Rhett
+    position: S
+  - jersey: 13
+    name: Jamir Conn
+    position: S
+  - jersey: 13
+    name: Nyziah Hunter
+    position: WR
+  - jersey: 14
+    name: Amare Sanders
+    position: CB
   - jersey: 14
     name: TJ Lateef
     position: QB
   - jersey: 15
-    name: Dylan Raiola
+    name: Anthony Jones
+    position: DE
+  - jersey: 15
+    name: Keelan Smith
+    position: WR
+  - jersey: 16
+    name: Bode Soukup
     position: QB
+  - jersey: 16
+    name: Danny Odem III
+    position: CB
+  - jersey: 17
+    name: Larry Miles
+    position: WR
+  - jersey: 17
+    name: Willis McGahee IV
+    position: DE
+  - jersey: 18
+    name: Quinn Clark
+    position: WR
+  - jersey: 18
+    name: Larry Tarver Jr.
+    position: CB
+  - jersey: 19
+    name: Kahmir Prescott
+    position: CB
+  - jersey: 19
+    name: Cortez Mills
+    position: WR
   - jersey: 21
-    name: Emmett Johnson
+    name: Kwinten Ives
+    position: RB
+  - jersey: 21
+    name: Rex Guthrie
+    position: S
+  - jersey: 22
+    name: Victor Evans III
+    position: CB
+  - jersey: 22
+    name: Isaiah Mozee
     position: RB
   - jersey: 23
     name: Caleb Benning
     position: S
+  - jersey: 23
+    name: Blye Hill
+    position: CB
+  - jersey: 23
+    name: Conor Booth
+    position: RB
+  - jersey: 24
+    name: Nalin Scott
+    position: WR
+  - jersey: 24
+    name: Dexter Foster
+    position: LB
+  - jersey: 25
+    name: Jeremiah Charles
+    position: CB
+  - jersey: 25
+    name: Jamal Rule
+    position: RB
+  - jersey: 26
+    name: Roman Mangini
+    position: WR
+  - jersey: 26
+    name: Dwayne McDougle
+    position: S
+  - jersey: 29
+    name: Braylen Prude
+    position: CB
+  - jersey: 29
+    name: Carter Nelson
+    position: TE
+  - jersey: 30
+    name: Vincent Genatone
+    position: LB
+  - jersey: 30
+    name: Jasin Shiggs
+    position: S
+  - jersey: 31
+    name: Mario Buford
+    position: CB
+  - jersey: 32
+    name: Trent Uhlir
+    position: LB
+  - jersey: 33
+    name: Owen Chambliss
+    position: LB
+  - jersey: 34
+    name: Owen Stoudmire
+    position: DT
+  - jersey: 35
+    name: Mekhi Nelson
+    position: RB
+  - jersey: 35
+    name: Christian Jones
+    position: LB
+  - jersey: 36
+    name: Rowdy Bauer
+    position: S
+  - jersey: 37
+    name: Kamdyn Koch
+    position: P
+  - jersey: 37
+    name: Donovan Jones
+    position: CB
+  - jersey: 38
+    name: Thomas D'Onofrio
+    position: S
+  - jersey: 39
+    name: David Hoffken
+    position: DT
+  - jersey: 39
+    name: Bryson Webber
+    position: CB
+  - jersey: 40
+    name: Dawson Merritt
+    position: LB
+  - jersey: 41
+    name: Tanner Terch
+    position: S
+  - jersey: 41
+    name: Luke Sorensen
+    position: TE
+  - jersey: 42
+    name: Derek Wacker
+    position: LB
+  - jersey: 43
+    name: Will Hawthorne
+    position: LB
+  - jersey: 44
+    name: Luke Lindenmeyer
+    position: TE
+  - jersey: 44
+    name: Jahsear Whittington
+    position: DT
+  - jersey: 45
+    name: Dylan Rogers
+    position: LB
+  - jersey: 45
+    name: Izaac Dickey
+    position: RB
+  - jersey: 46
+    name: Connor Schutt
+    position: WR
+  - jersey: 47
+    name: Gage Stenger
+    position: LB
+  - jersey: 48
+    name: Cayden Echternach
+    position: TE
+  - jersey: 49
+    name: Malcolm Simpson
+    position: DT
+  - jersey: 49
+    name: Danny King
+    position: TE
+  - jersey: 51
+    name: Justin Evans
+    position: OL
+  - jersey: 54
+    name: Jacob Bower
+    position: LB
+  - jersey: 54
+    name: Brendan Black
+    position: OL
+  - jersey: 55
+    name: Ethan Duda
+    position: DE
+  - jersey: 55
+    name: Tree Babalade
+    position: OL
+  - jersey: 56
+    name: Pierce Mooberry
+    position: LB
+  - jersey: 56
+    name: Julian Marks
+    position: OL
+  - jersey: 57
+    name: Elijah Pritchett
+    position: OL
+  - jersey: 57
+    name: Ashton Murphy
+    position: OL
+  - jersey: 58
+    name: Jake Peters
+    position: OL
+  - jersey: 62
+    name: Sam Sledge
+    position: OL
+  - jersey: 65
+    name: Paul Mubenga
+    position: OL
+  - jersey: 66
+    name: Grant Brix
+    position: OL
+  - jersey: 68
+    name: Preston Taumua
+    position: OL
+  - jersey: 69
+    name: Landen Davidson
+    position: DT
+  - jersey: 70
+    name: Nolan Fennessy
+    position: OL
+  - jersey: 71
+    name: Tyson Terry
+    position: DT
+  - jersey: 71
+    name: Claude Mpouma
+    position: OL
+  - jersey: 72
+    name: Gibson Pyle
+    position: OL
+  - jersey: 74
+    name: Brock Knutson
+    position: OL
+  - jersey: 75
+    name: Tyler Knaak
+    position: OL
+  - jersey: 76
+    name: Rex Waterman
+    position: OL
+  - jersey: 77
+    name: Gunnar Gottula
+    position: OL
+  - jersey: 78
+    name: Jacob Brandl
+    position: OL
+  - jersey: 79
+    name: Shawn Hammerbeck
+    position: OL
+  - jersey: 80
+    name: Jeremiah Jones
+    position: WR
+  - jersey: 81
+    name: Hayes Miller
+    position: WR
+  - jersey: 82
+    name: Eric Ingwerson
+    position: TE
+  - jersey: 83
+    name: Archie Wilson
+    position: P
+  - jersey: 84
+    name: DJ Singleton
+    position: WR
+  - jersey: 84
+    name: Michael Sarikizis
+    position: K
+  - jersey: 86
+    name: Mason Goldman
+    position: DT
+  - jersey: 87
+    name: Jack Wills
+    position: LS
+  - jersey: 88
+    name: Jackson Carpenter
+    position: WR
+  - jersey: 90
+    name: John Hohl
+    position: K
+  - jersey: 91
+    name: Kyle Cunanan
+    position: K
+  - jersey: 92
+    name: Sua Lefotu
+    position: DT
+  - jersey: 93
+    name: Kade Pietrzak
+    position: DE
+  - jersey: 94
+    name: Jordan Ochoa
+    position: DE
+  - jersey: 95
+    name: Gabe Moore
+    position: DT
+  - jersey: 96
+    name: Williams Nwaneri
+    position: DE
+  - jersey: 97
+    name: Mac Markway
+    position: DE
+  - jersey: 98
+    name: Conor Connealy
+    position: DE
+  - jersey: 99
+    name: Dylan Parrott
+    position: DT
