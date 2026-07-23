@@ -5,6 +5,7 @@ app = Flask(__name__)
 dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
 players_table = dynamodb.Table("NebraskaPlayers")
 schedule_table = dynamodb.Table("NebraskaSchedule2026")
+SELL_OUT_STREAK = "403+"
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -150,6 +151,10 @@ HTML_TEMPLATE = """
             color: #ffe8ea;
         }
 
+        .stat-wide {
+            grid-column: 1 / -1;
+        }
+
         .titles {
             margin-top: 8px;
             font-size: 12px;
@@ -160,19 +165,22 @@ HTML_TEMPLATE = """
             background: #fff;
             border-radius: 14px;
             border: 2px solid #f2d7cc;
-            padding: 10px;
             box-shadow: 0 8px 22px rgba(45, 16, 16, 0.14);
+            overflow: hidden;
         }
 
         .hero-image img {
             width: 100%;
+            height: 210px;
             display: block;
-            border-radius: 10px;
-            border: 1px solid #ead8cb;
+            object-fit: cover;
+            object-position: center 58%;
+            border-bottom: 1px solid #ead8cb;
         }
 
         .hero-image-caption {
-            margin-top: 8px;
+            margin: 0;
+            padding: 9px 10px 10px;
             font-size: 12px;
             color: #5d4b45;
             text-align: center;
@@ -364,13 +372,17 @@ HTML_TEMPLATE = """
                             <strong>900+</strong>
                             <span>All-Time Wins</span>
                         </div>
+                        <div class="stat stat-wide">
+                            <strong>{{ sellout_streak }}</strong>
+                            <span>Consecutive Sellouts</span>
+                        </div>
                     </div>
                     <p class="titles">National Championships: 1970, 1971, 1994, 1995, 1997</p>
                 </div>
 
                 <div class="hero-image">
-                    <img src="/nebraska_football.png" alt="Nebraska football pride artwork">
-                    <div class="hero-image-caption">Big Red energy for every game week.</div>
+                    <img src="/memorial_stadium.png" alt="Memorial Stadium under the lights in Lincoln">
+                    <div class="hero-image-caption">Memorial Stadium, ready for another sold-out Saturday.</div>
                 </div>
             </div>
         </div>
@@ -640,7 +652,12 @@ def index():
         schedule = schedule_response.get("Items", [])
         schedule = sorted(schedule, key=lambda x: int(x["GameId"]))
 
-        return render_template_string(HTML_TEMPLATE, players=players, schedule=schedule)
+        return render_template_string(
+            HTML_TEMPLATE,
+            players=players,
+            schedule=schedule,
+            sellout_streak=SELL_OUT_STREAK,
+        )
     except Exception as exc:
         return f"Error connecting to DynamoDB: {exc}", 500
 
@@ -648,6 +665,11 @@ def index():
 @app.route("/nebraska_football.png")
 def nebraska_football_image():
     return send_from_directory(".", "nebraska_football.png")
+
+
+@app.route("/memorial_stadium.png")
+def memorial_stadium_image():
+    return send_from_directory(".", "memorial_stadium.png")
 
 
 @app.route("/add", methods=["POST"])
