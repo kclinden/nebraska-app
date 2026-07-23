@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, request, redirect, url_for
+from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory
 import boto3
 
 app = Flask(__name__)
@@ -156,40 +156,26 @@ HTML_TEMPLATE = """
             color: #ffe8ea;
         }
 
-        .herbie-card {
-            display: grid;
-            grid-template-columns: auto 1fr;
-            align-items: center;
-            gap: 12px;
+        .hero-image {
             background: #fff;
-            color: var(--ink);
             border-radius: 14px;
             border: 2px solid #f2d7cc;
-            padding: 12px;
+            padding: 10px;
+            box-shadow: 0 8px 22px rgba(45, 16, 16, 0.14);
         }
 
-        .herbie-mark {
-            width: 72px;
-            height: 72px;
-            border-radius: 12px;
-            background: linear-gradient(180deg, #fff8ef, #ffe4cb);
-            border: 2px solid #d2ae93;
-            display: grid;
-            place-items: center;
-            font-size: 34px;
-            font-weight: 900;
-            color: var(--scarlet);
+        .hero-image img {
+            width: 100%;
+            display: block;
+            border-radius: 10px;
+            border: 1px solid #ead8cb;
         }
 
-        .herbie-card h4 {
-            margin: 0;
-            font-size: 16px;
-        }
-
-        .herbie-card p {
-            margin: 4px 0 0;
-            font-size: 13px;
+        .hero-image-caption {
+            margin-top: 8px;
+            font-size: 12px;
             color: #5d4b45;
+            text-align: center;
         }
 
         .main-content {
@@ -382,15 +368,9 @@ HTML_TEMPLATE = """
                     <p class="titles">National Championships: 1970, 1971, 1994, 1995, 1997</p>
                 </div>
 
-                <div class="herbie-card">
-                    <div class="herbie-mark">H</div>
-                    <div>
-                        <h4>Herbie Husker Corner</h4>
-                        <p>
-                            Hat tipped, sleeves rolled up, and ready for game day.
-                            Keep this page open as your Big Red command center.
-                        </p>
-                    </div>
+                <div class="hero-image">
+                    <img src="/nebraska_football.png" alt="Nebraska football pride artwork">
+                    <div class="hero-image-caption">Big Red energy for every game week.</div>
                 </div>
             </div>
         </div>
@@ -663,6 +643,11 @@ def index():
         return render_template_string(HTML_TEMPLATE, players=players, schedule=schedule)
     except Exception as exc:
         return f"Error connecting to DynamoDB: {exc}", 500
+
+
+@app.route("/nebraska_football.png")
+def nebraska_football_image():
+    return send_from_directory(".", "nebraska_football.png")
 
 
 @app.route("/add", methods=["POST"])
