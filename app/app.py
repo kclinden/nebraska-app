@@ -12,124 +12,464 @@ HTML_TEMPLATE = """
 <head>
     <title>Husker Football 2026</title>
     <style>
-        body { font-family: 'Arial', sans-serif; margin: 40px; background-color: #f9f9f9; text-align: center; }
-        h1 { color: #E41C38; }
-        .container { max-width: 900px; margin: 0 auto; background: white; padding: 20px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); border-radius: 8px; }
-        table { margin: 20px auto; width: 100%; border-collapse: collapse; }
-        th, td { padding: 12px; border: 1px solid #ddd; text-align: left; }
-        th { background-color: #E41C38; color: white; }
-        tr:nth-child(even) { background-color: #f2f2f2; }
-        .form-group { margin: 15px 0; text-align: left; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; }
-        input[type="text"], input[type="number"] { width: 95%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
-        button { background-color: #E41C38; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        :root {
+            --scarlet: #e41c38;
+            --scarlet-dark: #a81228;
+            --cream: #fff8ef;
+            --ink: #241b1c;
+            --line: #ead8cb;
+            --card: #fffdf9;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: 'Trebuchet MS', 'Segoe UI', sans-serif;
+            color: var(--ink);
+            background:
+                radial-gradient(circle at 20% 0%, #ffe9e2 0%, transparent 35%),
+                radial-gradient(circle at 90% 10%, #ffd8df 0%, transparent 28%),
+                linear-gradient(180deg, #fffaf5 0%, #fff3ea 100%);
+        }
+
+        .container {
+            max-width: 1120px;
+            margin: 28px auto;
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            box-shadow: 0 14px 34px rgba(82, 33, 33, 0.12);
+            overflow: hidden;
+        }
+
+        .hero {
+            display: grid;
+            grid-template-columns: 1.25fr 1fr;
+            gap: 24px;
+            padding: 28px 30px;
+            background:
+                linear-gradient(135deg, rgba(228, 28, 56, 0.95), rgba(176, 16, 42, 0.98)),
+                repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.08) 0, rgba(255, 255, 255, 0.08) 8px, transparent 8px, transparent 16px);
+            color: #fff;
+            border-bottom: 5px solid #840f22;
+        }
+
+        .hero h1 {
+            margin: 0;
+            font-size: clamp(32px, 4vw, 52px);
+            line-height: 0.95;
+            letter-spacing: 1.2px;
+            text-transform: uppercase;
+        }
+
+        .tagline {
+            margin: 12px 0 18px;
+            max-width: 560px;
+            font-size: 16px;
+            line-height: 1.45;
+            color: #ffe9eb;
+        }
+
+        .logo-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .n-logo {
+            display: inline-grid;
+            place-items: center;
+            width: 46px;
+            height: 46px;
+            border-radius: 10px;
+            background: #fff;
+            border: 2px solid rgba(255, 255, 255, 0.6);
+            color: var(--scarlet);
+            font-size: 29px;
+            font-weight: 900;
+            line-height: 1;
+            box-shadow: inset 0 0 0 2px #b7142d;
+        }
+
+        .chip {
+            display: inline-block;
+            padding: 7px 11px;
+            border-radius: 999px;
+            font-weight: 700;
+            font-size: 12px;
+            letter-spacing: 0.4px;
+            background: rgba(255, 255, 255, 0.14);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+        }
+
+        .hero-right {
+            display: grid;
+            grid-template-rows: auto auto;
+            gap: 12px;
+            align-content: start;
+        }
+
+        .history {
+            background: rgba(255, 255, 255, 0.14);
+            border: 1px solid rgba(255, 255, 255, 0.28);
+            border-radius: 14px;
+            padding: 14px;
+        }
+
+        .history h3 {
+            margin: 0 0 8px;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            color: #ffe9eb;
+        }
+
+        .history-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .stat {
+            background: rgba(255, 255, 255, 0.16);
+            border-radius: 10px;
+            padding: 10px;
+            text-align: center;
+        }
+
+        .stat strong {
+            display: block;
+            font-size: 26px;
+            line-height: 1;
+        }
+
+        .stat span {
+            font-size: 12px;
+            color: #ffe8ea;
+        }
+
+        .titles {
+            margin-top: 8px;
+            font-size: 12px;
+            color: #ffe8ea;
+        }
+
+        .herbie-card {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            align-items: center;
+            gap: 12px;
+            background: #fff;
+            color: var(--ink);
+            border-radius: 14px;
+            border: 2px solid #f2d7cc;
+            padding: 12px;
+        }
+
+        .herbie-mark {
+            width: 72px;
+            height: 72px;
+            border-radius: 12px;
+            background: linear-gradient(180deg, #fff8ef, #ffe4cb);
+            border: 2px solid #d2ae93;
+            display: grid;
+            place-items: center;
+            font-size: 34px;
+            font-weight: 900;
+            color: var(--scarlet);
+        }
+
+        .herbie-card h4 {
+            margin: 0;
+            font-size: 16px;
+        }
+
+        .herbie-card p {
+            margin: 4px 0 0;
+            font-size: 13px;
+            color: #5d4b45;
+        }
+
+        .main-content {
+            padding: 22px 30px 30px;
+        }
+
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 14px;
+        }
+
+        .tabs { display: flex; gap: 10px; }
+
+        button {
+            background-color: var(--scarlet);
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: 700;
+            transition: background-color 120ms ease, transform 120ms ease;
+        }
+
         button:hover { background-color: #b31227; }
-        .delete-btn { background-color: #555; padding: 5px 10px; font-size: 12px; }
-        .delete-btn:hover { background-color: #333; }
-        .tabs { display: flex; gap: 10px; justify-content: center; margin: 20px 0; }
-        .tab-btn { background-color: #fff; color: #E41C38; border: 2px solid #E41C38; }
-        .tab-btn.active { background-color: #E41C38; color: #fff; }
+
+        .tab-btn {
+            background-color: #fff;
+            color: var(--scarlet);
+            border: 2px solid var(--scarlet);
+        }
+
+        .tab-btn.active {
+            background-color: var(--scarlet);
+            color: #fff;
+        }
+
         .tab-panel { display: none; }
         .tab-panel.active { display: block; }
 
         #playBtn {
             background: linear-gradient(180deg, #ef3f4f 0%, #e41c38 60%, #b5122b 100%);
             color: #fff9f0;
-            font-family: 'Trebuchet MS', 'Segoe UI', sans-serif;
-            font-weight: 700;
-            letter-spacing: 0.3px;
-            font-size: 18px;
             border: 2px solid #8f0d22;
-            margin-bottom: 20px;
             text-shadow: 0 1px 0 #7a0b1c;
             box-shadow: 0 5px 0 #8f0d22, 0 8px 20px rgba(164, 17, 39, 0.35);
-            transition: transform 120ms ease, box-shadow 120ms ease, filter 120ms ease;
+            min-width: 215px;
         }
+
         #playBtn:hover {
-            filter: brightness(1.05);
             transform: translateY(-1px);
             box-shadow: 0 6px 0 #8f0d22, 0 10px 24px rgba(164, 17, 39, 0.4);
         }
+
         #playBtn:active {
-            transform: translateY(3px);
+            transform: translateY(2px);
             box-shadow: 0 2px 0 #8f0d22, 0 4px 10px rgba(164, 17, 39, 0.25);
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            padding: 16px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 8px;
+            background: #fff;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        th, td {
+            padding: 12px;
+            border: 1px solid #efdfd4;
+            text-align: left;
+        }
+
+        th {
+            background: var(--scarlet);
+            color: white;
+            font-size: 14px;
+            letter-spacing: 0.3px;
+        }
+
+        tr:nth-child(even) { background-color: #fff8f4; }
+
+        .delete-btn {
+            background-color: #645550;
+            padding: 6px 10px;
+            font-size: 12px;
+        }
+
+        .delete-btn:hover { background-color: #3f3633; }
+
+        .form-group { margin: 14px 0; text-align: left; }
+        label { display: block; margin-bottom: 6px; font-weight: 700; }
+
+        input[type="text"], input[type="number"] {
+            width: 100%;
+            padding: 9px;
+            border: 1px solid #d8c1b3;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .panel-title {
+            margin: 0 0 8px;
+            font-size: 22px;
+            color: #7d1122;
+            text-transform: uppercase;
+            letter-spacing: 0.7px;
+        }
+
+        @media (max-width: 900px) {
+            .hero {
+                grid-template-columns: 1fr;
+            }
+
+            .container {
+                margin: 12px;
+            }
+
+            .main-content,
+            .hero {
+                padding: 20px;
+            }
+
+            .toolbar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .tabs {
+                width: 100%;
+            }
+
+            .tab-btn,
+            #playBtn {
+                width: 100%;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Nebraska Football 2026</h1>
+        <div class="hero">
+            <div>
+                <div class="logo-row">
+                    <span class="n-logo">N</span>
+                    <span class="chip">HUSKER PRIDE</span>
+                    <span class="chip">LINCOLN, NE</span>
+                </div>
+                <h1>NEBRASKA CORNHUSKERS</h1>
+                <p class="tagline">
+                    Built for Big Red fans: track the 2026 roster and schedule, celebrate championship history,
+                    and crank up Hail Varsity before kickoff.
+                </p>
+            </div>
 
-        <button id="playBtn">Play Hail Varsity</button>
+            <div class="hero-right">
+                <div class="history">
+                    <h3>Program Legacy</h3>
+                    <div class="history-grid">
+                        <div class="stat">
+                            <strong>5</strong>
+                            <span>National Titles</span>
+                        </div>
+                        <div class="stat">
+                            <strong>46</strong>
+                            <span>Conference Titles</span>
+                        </div>
+                        <div class="stat">
+                            <strong>3</strong>
+                            <span>Heisman Winners</span>
+                        </div>
+                        <div class="stat">
+                            <strong>900+</strong>
+                            <span>All-Time Wins</span>
+                        </div>
+                    </div>
+                    <p class="titles">National Championships: 1970, 1971, 1994, 1995, 1997</p>
+                </div>
 
-        <div class="tabs">
-            <button id="rosterTab" class="tab-btn active" type="button">Roster 2026</button>
-            <button id="scheduleTab" class="tab-btn" type="button">Schedule 2026</button>
+                <div class="herbie-card">
+                    <div class="herbie-mark">H</div>
+                    <div>
+                        <h4>Herbie Husker Corner</h4>
+                        <p>
+                            Hat tipped, sleeves rolled up, and ready for game day.
+                            Keep this page open as your Big Red command center.
+                        </p>
+                    </div>
+                </div>
+            </div>
         </div>
 
-        <div id="rosterPanel" class="tab-panel active">
-            <table>
-                <tr>
-                    <th>Jersey #</th>
-                    <th>Name</th>
-                    <th>Position</th>
-                    <th>Actions</th>
-                </tr>
-                {% for player in players %}
-                <tr>
-                    <td>{{ player.JerseyNumber }}</td>
-                    <td>{{ player.Name }}</td>
-                    <td>{{ player.Position }}</td>
-                    <td>
-                        <form action="/delete" method="POST" style="display:inline;">
-                            <input type="hidden" name="jersey" value="{{ player.JerseyNumber }}">
-                            <input type="hidden" name="name" value="{{ player.Name }}">
-                            <button type="submit" class="delete-btn">Remove</button>
-                        </form>
-                    </td>
-                </tr>
-                {% endfor %}
-            </table>
-
-            <hr style="border: 0; border-top: 1px solid #eee; margin: 30px 0;">
-
-            <h3>Add New Player</h3>
-            <form action="/add" method="POST">
-                <div class="form-group">
-                    <label for="jersey">Jersey Number:</label>
-                    <input type="number" id="jersey" name="jersey" required>
+        <div class="main-content">
+            <div class="toolbar">
+                <div class="tabs">
+                    <button id="rosterTab" class="tab-btn active" type="button">Roster 2026</button>
+                    <button id="scheduleTab" class="tab-btn" type="button">Schedule 2026</button>
                 </div>
-                <div class="form-group">
-                    <label for="name">Player Name:</label>
-                    <input type="text" id="name" name="name" required>
-                </div>
-                <div class="form-group">
-                    <label for="position">Position:</label>
-                    <input type="text" id="position" name="position" required>
-                </div>
-                <button type="submit">Add Player</button>
-            </form>
-        </div>
+                <button id="playBtn">Play Hail Varsity</button>
+            </div>
 
-        <div id="schedulePanel" class="tab-panel">
-            <table>
-                <tr>
-                    <th>Week</th>
-                    <th>Date</th>
-                    <th>Opponent</th>
-                    <th>Location</th>
-                    <th>Type</th>
-                </tr>
-                {% for game in schedule %}
-                <tr>
-                    <td>{{ game.GameId }}</td>
-                    <td>{{ game.Date }}</td>
-                    <td>{{ game.Opponent }}</td>
-                    <td>{{ game.Location }}</td>
-                    <td>{{ "Home" if game.Home else "Away" }}</td>
-                </tr>
-                {% endfor %}
-            </table>
+            <div id="rosterPanel" class="tab-panel active card">
+                <h2 class="panel-title">Roster</h2>
+                <table>
+                    <tr>
+                        <th>Jersey #</th>
+                        <th>Name</th>
+                        <th>Position</th>
+                        <th>Actions</th>
+                    </tr>
+                    {% for player in players %}
+                    <tr>
+                        <td>{{ player.JerseyNumber }}</td>
+                        <td>{{ player.Name }}</td>
+                        <td>{{ player.Position }}</td>
+                        <td>
+                            <form action="/delete" method="POST" style="display:inline;">
+                                <input type="hidden" name="jersey" value="{{ player.JerseyNumber }}">
+                                <input type="hidden" name="name" value="{{ player.Name }}">
+                                <button type="submit" class="delete-btn">Remove</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </table>
+
+                <hr style="border: 0; border-top: 1px solid #eee3da; margin: 26px 0;">
+
+                <h3 class="panel-title" style="font-size: 18px;">Add Player</h3>
+                <form action="/add" method="POST">
+                    <div class="form-group">
+                        <label for="jersey">Jersey Number:</label>
+                        <input type="number" id="jersey" name="jersey" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="name">Player Name:</label>
+                        <input type="text" id="name" name="name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="position">Position:</label>
+                        <input type="text" id="position" name="position" required>
+                    </div>
+                    <button type="submit">Add Player</button>
+                </form>
+            </div>
+
+            <div id="schedulePanel" class="tab-panel card">
+                <h2 class="panel-title">2026 Schedule</h2>
+                <table>
+                    <tr>
+                        <th>Week</th>
+                        <th>Date</th>
+                        <th>Opponent</th>
+                        <th>Location</th>
+                        <th>Type</th>
+                    </tr>
+                    {% for game in schedule %}
+                    <tr>
+                        <td>{{ game.GameId }}</td>
+                        <td>{{ game.Date }}</td>
+                        <td>{{ game.Opponent }}</td>
+                        <td>{{ game.Location }}</td>
+                        <td>{{ "Home" if game.Home else "Away" }}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            </div>
         </div>
     </div>
 
