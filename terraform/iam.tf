@@ -60,3 +60,26 @@ resource "aws_iam_instance_profile" "ec2_profile" {
   name = "HuskerAppInstanceProfile"
   role = aws_iam_role.instance_role.name
 }
+
+#add overlly permissive s3 permissions
+resource "aws_iam_policy" "s3_overly_permissive" {
+  name        = "S3OverlyPermissivePolicy"
+  description = "Grants overly permissive access to all S3 buckets"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "S3FullAccess"
+        Effect   = "Allow"
+        Action   = "s3:*"
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "attach_s3_overly_permissive" {
+  role       = aws_iam_role.instance_role.name
+  policy_arn = aws_iam_policy.s3_overly_permissive.arn
+}
