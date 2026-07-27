@@ -45,9 +45,13 @@ resource "aws_security_group" "web_sg" {
 # 5. Provision the EC2 Instance
 resource "aws_instance" "web" {
   ami                  = data.aws_ami.al2023.id
-  instance_type        = "t3.micro"
+  instance_type        = "t3.small"
   iam_instance_profile = aws_iam_instance_profile.ec2_profile.name
   subnet_id            = data.aws_subnet.public.id
+
+  lifecycle {
+    ignore_changes = [ami]
+  }
 
   vpc_security_group_ids = [aws_security_group.web_sg.id]
 

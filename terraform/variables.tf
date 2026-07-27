@@ -9,3 +9,15 @@ variable "app_repo_branch" {
   type        = string
   default     = "main"
 }
+
+variable "tf_backend_bucket_name" {
+  description = "S3 bucket name that stores Terraform remote state"
+  type        = string
+  default     = "klinden-tfstate"
+}
+
+variable "tf_backend_lock_table_name" {
+  description = "DynamoDB table name used for Terraform state locking"
+  type        = string
+  default     = "klinden-tfstate"
+}

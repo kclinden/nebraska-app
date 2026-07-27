@@ -19,3 +19,6 @@ override.tf.json
 .terraformrc
 terraform.rc
 *.tfplan
+
+# Local backend configuration (contains account-specific values)
+terraform/backend.hcl
