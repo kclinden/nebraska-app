@@ -1,11 +1,11 @@
 #Get VPC by ID
 data "aws_vpc" "selected" {
-  id = "vpc-077cef3ab0fd02758" # Replace with your VPC ID
+  id = "vpc-0fcff7b12581d1305" # Replace with your VPC ID
 }
 
 #get public subnet by id subnet-02802090b0187a15d
 data "aws_subnet" "public" {
-  id = "subnet-02802090b0187a15d" # Replace with your public subnet ID
+  id = "subnet-0cdb09b5f33e1f192" # Replace with your public subnet ID
 }
 
 # Data source to fetch the latest AL2023 AMI

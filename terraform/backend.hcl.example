@@ -1,5 +1,5 @@
 bucket         = "klinden-tfstate"
 key            = "nebraska-app/terraform.tfstate"
 region         = "us-east-1"
-dynamodb_table = "klinden-tfstate"
 encrypt        = true
+use_lockfile = true
