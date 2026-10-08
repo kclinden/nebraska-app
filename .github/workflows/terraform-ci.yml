@@ -4,19 +4,21 @@ on:
   push:
     paths:
       - "terraform/**"
+      - "data/**"
       - ".github/workflows/terraform-ci.yml"
   pull_request:
     paths:
       - "terraform/**"
+      - "data/**"
       - ".github/workflows/terraform-ci.yml"
 
 jobs:
   terraform:
-    name: terraform
+    name: terraform (aws)
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: terraform
+        working-directory: terraform/aws
 
     steps:
       - name: Checkout

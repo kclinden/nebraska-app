@@ -1,81 +1,115 @@
 # Nebraska App
 
-Infrastructure and deployment configuration for the Nebraska app.
+Husker football roster and schedule app (Flask + DynamoDB), packaged as a container and deployable locally or to AWS.
 
 ## Repository Layout
 
-- `app/` application source and related assets
-- `terraform/` infrastructure as code for cloud resources
+- `app/` application source, `Dockerfile`, and related assets
+- `data/` roster and schedule YAML, shared by local seeding and every cloud stack
+- `scripts/` score fetcher and DynamoDB Local seeder
+- `terraform/aws/` AWS stack (VPC, ECS Fargate, ALB, ECR, DynamoDB, IAM); other CSPs can be added alongside as `terraform/<csp>/`
+- `docker-compose.yml` local test stack
+- `Makefile` shortcuts for local, AWS, and GitHub workflows (run `make help`)
 
-## Terraform Quick Start
+## Make Targets
 
-From the repository root:
+| Target | Description |
+| --- | --- |
+| `make local-up` | Fetch scores, build, and start the local stack at http://localhost:8080 |
+| `make local-down` | Stop the local stack |
+| `make local-restart` | Rebuild and restart with fresh data |
+| `make local-logs` | Tail container logs |
+| `make local-reseed` | Re-run the DynamoDB Local seeder |
+| `make scores` | Refresh `app/scores.json` from ESPN |
+| `make aws-login` | Ensure an AWS SSO session is active (runs `aws sso login` if expired) |
+| `make aws-plan` | `fmt`, `validate`, and `plan` |
+| `make aws-deploy` | Create/update the full stack, push the image, roll out ECS, and link GitHub Actions |
+| `make aws-push` | Build the image locally, push to ECR, and roll out ECS |
+| `make aws-redeploy` | Restart the ECS service on the current `:latest` image |
+| `make aws-url` | Print the app URL |
+| `make aws-logs` | Tail the app's CloudWatch logs |
+| `make aws-destroy` | Destroy all AWS resources and remove the GitHub `AWS_ROLE_ARN` variable |
+| `make gh-setup` | Set the `AWS_ROLE_ARN`/`AWS_REGION` repo variables from Terraform outputs |
 
-```bash
-cd terraform
-terraform init
-terraform fmt -recursive
-terraform validate
-```
+## Local Testing (Docker)
 
-## Terraform Remote State (S3 + DynamoDB Locking)
-
-This repo is configured for an S3 backend using partial backend config in `terraform/backend.tf`.
-
-Backend resources are also managed by this same Terraform stack in `terraform/backend_resources.tf`.
-
-1. Bootstrap backend resources with local state (one time):
-
-```bash
-cd terraform
-terraform init -backend=false
-terraform apply -target=aws_s3_bucket.tf_state -target=aws_dynamodb_table.tf_lock
-```
-
-2. Create local backend config from the example:
-
-```bash
-cd terraform
-cp backend.hcl.example backend.hcl
-```
-
-Defaults are set to the requested names:
-
-- bucket: `klinden-tfstate`
-- dynamodb_table: `klinden-tfstate`
-
-Update values only if you want different names.
-
-3. Migrate existing local state into S3:
+Requires Docker and Python 3. No AWS account or credentials needed.
 
 ```bash
-terraform init -backend-config=backend.hcl -migrate-state
-terraform plan
+make local-up     # http://localhost:8080
+make local-down
 ```
 
-Notes:
+`docker-compose.yml` runs three services:
 
-- `terraform/backend.hcl` is gitignored because it is environment-specific.
-- DynamoDB table provides state locking to prevent concurrent Terraform writes.
+- `dynamodb-local` - [Amazon DynamoDB Local](https://hub.docker.com/r/amazon/dynamodb-local), in-memory, exposed on `localhost:8000`.
+- `seed` - runs `scripts/seed_local_dynamodb.py` to create the `NebraskaPlayers` and `NebraskaSchedule2026` tables and load `data/roster.yaml` and `data/schedule.yaml`.
+- `app` - the app image, started after seeding succeeds.
 
-## Application Source and Deploy Model
+The app needs no code changes to run locally: boto3 honors `AWS_ENDPOINT_URL_DYNAMODB`, which compose points at `dynamodb-local`. Credentials are dummy values. Data is reset every time the stack stops; roster add/remove changes are not persisted.
 
-- The Flask application source now lives in `app/app.py`.
-- EC2 user data now clones application code from GitHub during instance boot.
-- EC2 installs dependencies from `app/requirements.txt`.
-
-## Update App Code Without Terraform Redeploy
-
-After pushing app changes to GitHub, run:
+To inspect the local tables from your machine:
 
 ```bash
-cd terraform
-./update_app_on_ec2.sh
+AWS_ACCESS_KEY_ID=local AWS_SECRET_ACCESS_KEY=local \
+  aws dynamodb scan --table-name NebraskaSchedule2026 --endpoint-url http://localhost:8000 --region us-east-1
 ```
 
-This uses AWS Systems Manager Run Command to execute `/usr/local/bin/update-husker-app` on the instance, which pulls the latest code and restarts services.
+## Scores and Game Stats
+
+`scripts/update_scores.py` pulls final scores, team stats, and Husker leaders for completed games from ESPN's public API and writes `app/scores.json` (gitignored, generated at build time). Set `SEASON=2025` to fetch a different season. Without the file the app still runs; scores just show `-`. `make scores` keeps the existing file if ESPN is unreachable.
+
+## AWS Deploy
+
+Requires the AWS CLI with an SSO profile, Terraform >= 1.6, Docker, and optionally the GitHub CLI (`gh`). All `aws-*` targets first run `make aws-login`, which opens `aws sso login` if the session has expired. The profile defaults to `master`; override with `AWS_PROFILE=member`. Region defaults to `us-east-1`; override with `AWS_REGION=us-west-2`.
+
+```bash
+make aws-plan
+make aws-deploy      # prints the load balancer URL when done
+make aws-destroy     # tear everything down
+```
+
+The stack deploys into a blank account/region; it creates its own networking and needs nothing pre-existing.
+
+`make aws-deploy` runs in this order so the service never starts without an image:
+
+1. Create the ECR repository (targeted apply).
+2. Build the image locally (`linux/amd64`) and push `:latest` and `:sha-<commit>`.
+3. Apply the rest of the stack.
+4. Force a new ECS deployment and wait for it to become stable.
+5. Set GitHub repo variables via `make gh-setup` (skipped with a message if `gh` isn't installed).
+
+### State
+
+Terraform uses **local state** in `terraform/aws/terraform.tfstate` (gitignored). There is no remote backend; keep the file on the machine that deploys, or run `make aws-destroy` before deleting it.
+
+### Architecture
+
+- **Network** (`network.tf`): VPC (`10.20.0.0/16` by default, `vpc_cidr`), internet gateway, and two public `/24` subnets in the first two AZs with a default route to the IGW. No NAT gateway.
+- **Compute** (`ecs.tf`): ECS Fargate service `husker-app` (1 task, 0.25 vCPU / 512 MB) running `nebraska-app:latest` from ECR, with deployment circuit breaker and rollback. Tasks get a public IP for outbound access; their security group only admits the ALB on port 5000.
+- **Load balancer**: internet-facing ALB on port 80 across both public subnets.
+- **Data** (`db.tf`): DynamoDB tables `NebraskaPlayers` and `NebraskaSchedule2026`, seeded from `data/*.yaml`.
+- **IAM** (`iam.tf`): task execution role (pull image, write logs), task role (DynamoDB read/write + `S3OverlyPermissivePolicy`), and a GitHub OIDC role limited to pushing to the ECR repo and updating the service.
+- **Logs**: CloudWatch `/ecs/husker-app` (30-day retention).
+
+## Container Image and Deploy (GitHub Actions)
+
+Building and deploying are separate workflows, so the image build never depends on the state of AWS.
+
+**`docker-build.yml` - build and publish (no cloud dependency).** Refreshes scores, builds the image from `app/`, and pushes it to `ghcr.io/<owner>/<repo>`:
+
+- on pushes to `main` touching `app/` or `scripts/` (tags `latest` and `sha-<commit>`)
+- every Sunday 12:00 UTC during the season (Aug-Jan) to pick up the weekend's game (adds a `YYYYMMDD` tag)
+- manually via **Run workflow**
+- on pull requests: builds without pushing and runs a container smoke test
+
+**`deploy-aws.yml` - deploy to AWS.** Runs after a successful `Docker Build` on `main` (or manually). It copies the exact `sha-<commit>` image from GHCR into ECR as `:latest` and `:sha-<commit>`, then rolls out the ECS service. It is skipped entirely when the `AWS_ROLE_ARN` repository variable is unset (e.g. after `make aws-destroy`), and a failure here doesn't affect the build.
+
+Authentication uses GitHub OIDC, so no AWS access keys are stored in GitHub. `make aws-deploy` sets `AWS_ROLE_ARN` and `AWS_REGION` automatically (or run `make gh-setup`). If `gh` isn't installed, set them under **Settings > Secrets and variables > Actions > Variables**, using `terraform -chdir=terraform/aws output -raw github_actions_role_arn`.
+
+If the AWS account already has a GitHub OIDC provider (`token.actions.githubusercontent.com`), deploy with `TF_VAR_create_github_oidc_provider=false` to reuse it.
 
 ## Notes
 
 - Terraform state files are intentionally ignored by git.
-- CI validates Terraform formatting and configuration on push and pull requests.
+- CI validates `terraform/aws` formatting and configuration on push and pull requests.

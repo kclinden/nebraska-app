@@ -1,11 +1,7 @@
-provider "aws" {
-  region = "us-east-1" # Change to your active region
-}
-
-# 1. Read and decode the YAML file
+# 1. Read and decode the shared YAML data
 locals {
-  roster_data   = yamldecode(file("${path.module}/roster.yaml"))
-  schedule_data = yamldecode(file("${path.module}/schedule.yaml"))
+  roster_data   = yamldecode(file("${path.module}/../../data/roster.yaml"))
+  schedule_data = yamldecode(file("${path.module}/../../data/schedule.yaml"))
   # Use a stable unique key for for_each while still allowing duplicate jersey numbers.
   players_map = {
     for idx, player in local.roster_data.players :
