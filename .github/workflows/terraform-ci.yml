@@ -14,11 +14,15 @@ on:
 
 jobs:
   terraform:
-    name: terraform (aws)
+    name: terraform (${{ matrix.cloud }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cloud: [aws, azure]
     defaults:
       run:
-        working-directory: terraform/aws
+        working-directory: terraform/${{ matrix.cloud }}
 
     steps:
       - name: Checkout
