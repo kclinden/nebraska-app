@@ -2,6 +2,33 @@
 
 Husker football roster and schedule app (Flask), packaged as a container and deployable locally, to AWS, Azure, or GCP.
 
+## TL;DR
+
+```bash
+make setup-check                 # check tools/logins; prints fix commands
+
+# Local (no cloud account needed)
+make local-up                    # http://localhost:8080
+make local-down
+
+# Cloud - pick one; each prints the app URL when done
+make aws-deploy                  # ECS Fargate + DynamoDB      (AWS SSO profile, default: master)
+make azure-deploy                # App Service + Table Storage (active az subscription)
+make gcp-deploy                  # Cloud Run + Firestore       (active gcloud project)
+
+# After a new image is published (e.g. the weekly score refresh)
+make <cloud>-push                # copy the latest GHCR image and roll it out
+
+# Clean up
+make <cloud>-destroy
+```
+
+- Every cloud deploys the same image, `ghcr.io/kclinden/nebraska-app:latest`, built by GitHub Actions. Merge to `main` and let the **Docker Build** workflow finish before deploying app changes.
+- Deploys need Terraform >= 1.6 and the cloud's CLI; AWS and GCP also need Docker to copy the image.
+- Terraform state is local per cloud (`terraform/<cloud>/terraform.tfstate`). Run `make <cloud>-destroy` from the same machine when you're done.
+- Running cost while deployed: AWS (ALB + Fargate) and Azure (B1 plan) bill continuously; GCP Cloud Run scales to zero.
+- Add `VERBOSE=1` to any target for Terraform `INFO` logs and verbose `az`/`gcloud` output.
+
 ## Overview
 
 ![Nebraska App - schedule with game stats expanded](docs/app-screenshot.png)
@@ -122,7 +149,7 @@ GitHub Actions only builds and publishes to GHCR; it has no cloud credentials. D
 
 | Target | Description |
 | --- | --- |
-| `make setup-check` | Check required tools and logins, with fix suggestions (`SECTIONS="local aws"` to limit) |
+| `make setup-check` | Check required tools and logins, with fix suggestions (`SECTIONS="local gcp"` to limit) |
 | `make local-up` | Fetch scores, build, and start the local stack at http://localhost:8080 |
 | `make local-down` | Stop the local stack |
 | `make local-restart` | Rebuild and restart with fresh data |
@@ -134,7 +161,7 @@ GitHub Actions only builds and publishes to GHCR; it has no cloud credentials. D
 | `make aws-deploy` | Create/update the full stack, copy the GHCR image to ECR, and roll out ECS |
 | `make aws-push` | Copy the latest GHCR image to ECR and roll out ECS |
 | `make aws-image-local` | Build from your working copy and push to ECR (then `make aws-redeploy`) |
-| `make aws-redeploy` | Restart the ECS service on the current `:latest` image |
+| `make aws-redeploy` | Force a new ECS deployment on the current `:latest` image and show rollout progress until stable |
 | `make aws-url` | Print the app URL |
 | `make aws-logs` | Tail the app's CloudWatch logs |
 | `make aws-destroy` | Destroy all AWS resources |
@@ -249,7 +276,7 @@ make azure-destroy   # tear everything down
 1. Registers the needed resource providers (`Microsoft.Web`, `ContainerRegistry`, `ManagedIdentity`, `Storage`).
 2. Creates the resource group and ACR (targeted apply).
 3. Imports `ghcr.io/kclinden/nebraska-app:latest` into ACR with `az acr import` (`GHCR_TAG=...` for a specific build).
-4. Applies the rest of the stack.
+4. Applies the rest of the stack, then waits for the URL to return HTTP 200 (the first start pulls the image, so allow a minute or two).
 
 To roll out a newer GHCR build later, run `make azure-push`. App Service pulls the image again when the app restarts, so `azure-redeploy` restarts it and polls the URL until it returns 200. The app service plan is billed while it exists (B1 is roughly $13/month); `make azure-destroy` removes it. Override the tier with `TF_VAR_app_service_sku=B2`.
 
@@ -332,7 +359,18 @@ flowchart LR
 
 GitHub Actions does not deploy to any cloud; `make aws-push` / `make azure-push` / `make gcp-push` copy the published image into ECR / ACR / Artifact Registry.
 
+## Troubleshooting
+
+| Symptom | Cause / fix |
+| --- | --- |
+| `HTTP response was nil; connection may have been reset` while creating table entries or documents | Dropped connections from the local network (not throttling). Re-run `make <cloud>-deploy`; Terraform retries only what failed. |
+| GCP `403 ... permission denied` from Terraform but the console works | Terraform uses Application Default Credentials, which may belong to a different account than `gcloud`. Run `gcloud auth application-default login` as the project account. |
+| `Error connecting to the database` right after a deploy | New role assignments can take a few minutes to apply (Azure especially). Wait and refresh; check `make <cloud>-logs`. |
+| Page shows `-` for every score | `app/scores.json` was missing when the image was built (ESPN unreachable). Re-run the Docker Build workflow, then `make <cloud>-push`. |
+| Azure `terraform destroy` waits a long time | Deleting a resource group's resources can take several minutes; if it errors, run `make azure-destroy` again, or `az group delete -n rg-husker-app --yes` and remove `terraform/azure/terraform.tfstate*`. |
+
 ## Notes
 
 - Terraform state files are intentionally ignored by git.
 - CI validates `terraform/aws`, `terraform/azure`, and `terraform/gcp` formatting and configuration on push and pull requests.
+- Each cloud stack intentionally grants the app an overly permissive storage role (AWS `S3OverlyPermissivePolicy`, Azure `Storage Blob Data Owner` at subscription scope, GCP `roles/storage.admin`) for security-scanner demos. Remove it from `iam.tf` for least privilege.
