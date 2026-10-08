@@ -15,7 +15,7 @@ AZ_TF := ARM_SUBSCRIPTION_ID=$$(az account show --query id -o tsv) terraform -ch
 export AZURE_EXTENSION_USE_DYNAMIC_INSTALL := yes_without_prompt
 
 .DEFAULT_GOAL := help
-.PHONY: help scores local-up local-down local-restart local-logs local-reseed \
+.PHONY: help setup-check scores local-up local-down local-restart local-logs local-reseed \
         aws-login aws-init aws-plan aws-deploy aws-ecr-login aws-image aws-image-local aws-push \
         aws-redeploy aws-url aws-logs aws-destroy \
         azure-login azure-init azure-plan azure-deploy azure-outputs azure-image azure-image-local \
@@ -23,6 +23,9 @@ export AZURE_EXTENSION_USE_DYNAMIC_INSTALL := yes_without_prompt
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
+
+setup-check: ## Check dev tools and logins (SECTIONS="local aws azure" to limit)
+	@scripts/check_setup.sh $(SECTIONS)
 
 # ---------- Local (Docker + DynamoDB Local) ----------
 
