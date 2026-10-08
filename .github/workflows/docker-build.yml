@@ -1,6 +1,6 @@
 name: Docker Build
 
-# Builds and publishes the image to GHCR only; AWS deployment lives in deploy-aws.yml.
+# Builds and publishes the image to GHCR only; `make aws-deploy` copies it into ECR.
 on:
   push:
     branches: [main]
