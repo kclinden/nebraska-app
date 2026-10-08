@@ -11,7 +11,13 @@ variable "resource_group_name" {
 }
 
 variable "image_tag" {
-  description = "Image tag the container app runs"
+  description = "Image tag the web app runs"
   type        = string
   default     = "latest"
+}
+
+variable "app_service_sku" {
+  description = "App Service plan SKU (B1 is the cheapest tier with Always On)"
+  type        = string
+  default     = "B1"
 }
