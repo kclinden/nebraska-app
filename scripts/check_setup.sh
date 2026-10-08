@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Checks that this machine has what the Makefile needs and prints how to fix anything missing.
-# Usage: scripts/check_setup.sh [local] [aws] [azure]   (no args = all)
+# Usage: scripts/check_setup.sh [local] [aws] [azure] [gcp]   (no args = all)
 set -uo pipefail
 
 AWS_PROFILE="${AWS_PROFILE:-master}"
@@ -125,6 +125,31 @@ check_azure() {
   fi
 }
 
+check_gcp() {
+  section "GCP (make gcp-*)"
+  check_terraform
+  if need gcloud "$PKG_CASK google-cloud-sdk"; then
+    ok "gcloud" "$(gcloud version --format='value("Google Cloud SDK")' 2>/dev/null)"
+    if gcloud auth print-access-token >/dev/null 2>&1; then
+      ok "gcloud login" "$(gcloud config get-value account 2>/dev/null)"
+    else
+      warn "gcloud login" "not logged in" "gcloud auth login  (make gcp-login does this)"
+    fi
+    if gcloud auth application-default print-access-token >/dev/null 2>&1; then
+      ok "application default creds" "present (used by Terraform)"
+    else
+      warn "application default creds" "missing" "gcloud auth application-default login"
+    fi
+    local project
+    project=$(gcloud config get-value project 2>/dev/null)
+    if [[ -n "$project" ]]; then
+      ok "gcloud project" "$project"
+    else
+      fail "gcloud project" "not set" "gcloud config set project <project-id>"
+    fi
+  fi
+}
+
 check_optional() {
   section "Optional"
   if command -v gh >/dev/null 2>&1; then
@@ -135,7 +160,7 @@ check_optional() {
 }
 
 targets=("$@")
-[[ ${#targets[@]} -eq 0 ]] && targets=(local aws azure)
+[[ ${#targets[@]} -eq 0 ]] && targets=(local aws azure gcp)
 
 printf '%sNebraska App - developer setup check%s\n' "$BOLD" "$RESET"
 for t in "${targets[@]}"; do
@@ -143,7 +168,8 @@ for t in "${targets[@]}"; do
     local) check_local ;;
     aws) check_aws ;;
     azure) check_azure ;;
-    *) echo "Unknown section '$t' (use local, aws, azure)" >&2; exit 2 ;;
+    gcp) check_gcp ;;
+    *) echo "Unknown section '$t' (use local, aws, azure, gcp)" >&2; exit 2 ;;
   esac
 done
 check_optional

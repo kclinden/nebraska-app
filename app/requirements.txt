@@ -2,4 +2,5 @@ flask
 boto3
 azure-data-tables
 azure-identity
+google-cloud-firestore
 gunicorn

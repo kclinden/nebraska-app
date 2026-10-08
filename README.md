@@ -1,6 +1,6 @@
 # Nebraska App
 
-Husker football roster and schedule app (Flask), packaged as a container and deployable locally, to AWS, or to Azure.
+Husker football roster and schedule app (Flask), packaged as a container and deployable locally, to AWS, Azure, or GCP.
 
 ## Overview
 
@@ -11,7 +11,7 @@ Husker football roster and schedule app (Flask), packaged as a container and dep
 - **Program Legacy**: national/conference titles, Heisman winners, all-time wins, and the sellout streak, next to a Memorial Stadium photo.
 - **Play Hail Varsity**: plays the fight song in the browser (Web Audio).
 
-Scores and stats come from ESPN and are baked into the image at build time; the weekly GitHub Actions build refreshes them after each game. Roster and schedule live in DynamoDB (AWS/local) or Azure Table Storage.
+Scores and stats come from ESPN and are baked into the image at build time; the weekly GitHub Actions build refreshes them after each game. Roster and schedule live in DynamoDB (AWS/local), Azure Table Storage, or Firestore (GCP).
 
 ## Getting Started
 
@@ -20,7 +20,7 @@ make setup-check   # verify tools and logins; prints fix commands for anything m
 make local-up      # http://localhost:8080
 ```
 
-`make setup-check` (or `scripts/check_setup.sh [local] [aws] [azure]`) checks git, make, curl, Python, Docker (daemon, `linux/amd64` builds, Compose), ESPN reachability, Terraform >= 1.6, AWS CLI v2 with the SSO profile and session, Azure CLI and login, and the GitHub CLI. It exits non-zero if a required tool is missing.
+`make setup-check` (or `scripts/check_setup.sh [local] [aws] [azure] [gcp]`) checks git, make, curl, Python, Docker (daemon, `linux/amd64` builds, Compose), ESPN reachability, Terraform >= 1.6, AWS CLI v2 with the SSO profile and session, Azure CLI and login, gcloud with login, Application Default Credentials, and project, and the GitHub CLI. It exits non-zero if a required tool is missing.
 
 ## Architecture
 
@@ -55,13 +55,21 @@ flowchart LR
         ACR[(ACR)] --> ACA
     end
 
+    subgraph GCP
+        RUN[Cloud Run<br/>HTTPS] --> FS[(Firestore)]
+        GAR[(Artifact Registry)] --> RUN
+    end
+
     GHCR -- make aws-push --> ECR
     GHCR -- make azure-push<br/>az acr import --> ACR
+    GHCR -- make gcp-push --> GAR
     Data -- terraform --> DDB
     Data -- terraform --> Tables
+    Data -- terraform --> FS
     Make --> Compose
     Users((Fans)) --> ALB
     Users --> ACA
+    Users --> RUN
 ```
 
 ### Request flow
@@ -69,9 +77,9 @@ flowchart LR
 ```mermaid
 sequenceDiagram
     participant B as Browser
-    participant F as Front door<br/>(ALB / App Service front end)
+    participant F as Front door<br/>(ALB / App Service / Cloud Run)
     participant A as Flask app (gunicorn)
-    participant S as Storage<br/>(DynamoDB / Table Storage)
+    participant S as Storage<br/>(DynamoDB / Table Storage / Firestore)
     B->>F: GET /
     F->>A: forward to :5000
     A->>S: list players, list games
@@ -85,29 +93,30 @@ sequenceDiagram
 
 ### Components
 
-| Component | Local | AWS | Azure |
-| --- | --- | --- | --- |
-| Container runtime | Docker Compose | ECS Fargate (0.25 vCPU / 512 MB) | App Service, Linux B1 plan (1 vCPU / 1.75 GB) |
-| Ingress | `localhost:8080` | ALB, HTTP :80 | Managed HTTPS ingress |
-| Image source | Local build | ECR (copied from GHCR) | ACR (imported from GHCR) |
-| Data | DynamoDB Local (in-memory) | DynamoDB | Table Storage |
-| App identity | Dummy keys | ECS task role | User-assigned managed identity |
-| Network | Compose network | VPC, 2 public subnets, IGW | App Service multi-tenant front end |
-| Logs | `docker compose logs` | CloudWatch `/ecs/husker-app` | App Service log stream (`make azure-logs`) |
-| Infra code | `docker-compose.yml` | `terraform/aws` | `terraform/azure` |
+| Component | Local | AWS | Azure | GCP |
+| --- | --- | --- | --- | --- |
+| Container runtime | Docker Compose | ECS Fargate (0.25 vCPU / 512 MB) | App Service, Linux B1 plan (1 vCPU / 1.75 GB) | Cloud Run (1 vCPU / 512 MiB, scales 0-1) |
+| Ingress | `localhost:8080` | ALB, HTTP :80 | Managed HTTPS ingress | Managed HTTPS (`*.run.app`) |
+| Image source | Local build | ECR (copied from GHCR) | ACR (imported from GHCR) | Artifact Registry (copied from GHCR) |
+| Data | DynamoDB Local (in-memory) | DynamoDB | Table Storage | Firestore (Native mode) |
+| App identity | Dummy keys | ECS task role | User-assigned managed identity | Service account `husker-app-run` |
+| Network | Compose network | VPC, 2 public subnets, IGW | App Service multi-tenant front end | Cloud Run managed |
+| Logs | `docker compose logs` | CloudWatch `/ecs/husker-app` | App Service log stream (`make azure-logs`) | Cloud Logging (`make gcp-logs`) |
+| Infra code | `docker-compose.yml` | `terraform/aws` | `terraform/azure` | `terraform/gcp` |
 
-GitHub Actions only builds and publishes to GHCR; it has no cloud credentials. Deployments are pulled into each cloud by `make aws-deploy` / `make azure-deploy` (and `*-push` for updates), so the build never depends on the state of AWS or Azure.
+GitHub Actions only builds and publishes to GHCR; it has no cloud credentials. Deployments are pulled into each cloud by `make aws-deploy` / `make azure-deploy` / `make gcp-deploy` (and `*-push` for updates), so the build never depends on the state of any cloud.
 
 ## Repository Layout
 
-- `app/` application source, `Dockerfile`, and related assets; `storage.py` selects DynamoDB or Azure Table Storage via `STORAGE_BACKEND`
+- `app/` application source, `Dockerfile`, and related assets; `storage.py` selects DynamoDB, Azure Table Storage, or Firestore via `STORAGE_BACKEND`
 - `data/` roster and schedule YAML, shared by local seeding and every cloud stack
 - `scripts/` developer setup check, score fetcher, and DynamoDB Local seeder
 - `docs/` README assets (app screenshot)
 - `terraform/aws/` AWS stack (VPC, ECS Fargate, ALB, ECR, DynamoDB, IAM)
 - `terraform/azure/` Azure stack (App Service, ACR, Table Storage, managed identity)
+- `terraform/gcp/` GCP stack (Cloud Run, Artifact Registry, Firestore, service account)
 - `docker-compose.yml` local test stack
-- `Makefile` shortcuts for local, AWS, and Azure workflows (run `make help`)
+- `Makefile` shortcuts for local, AWS, Azure, and GCP workflows (run `make help`)
 
 ## Make Targets
 
@@ -139,6 +148,16 @@ GitHub Actions only builds and publishes to GHCR; it has no cloud credentials. D
 | `make azure-url` | Print the app URL |
 | `make azure-logs` | Stream the web app's container logs |
 | `make azure-destroy` | Destroy all Azure resources |
+| `make gcp-login` | Ensure gcloud and Application Default Credentials are logged in; show the project |
+| `make gcp-plan` | Enable APIs, `fmt`, `validate`, and `plan` |
+| `make gcp-deploy` | Create/update the full stack, copy the GHCR image to Artifact Registry, deploy Cloud Run, and wait for HTTP 200 |
+| `make gcp-push` | Copy the latest GHCR image to Artifact Registry and deploy a new revision |
+| `make gcp-image-local` | Build from your working copy and push to Artifact Registry (then `make gcp-redeploy`) |
+| `make gcp-redeploy` | Deploy a new Cloud Run revision from `:latest`, then wait for HTTP 200 |
+| `make gcp-status` | Show the ready revision, image, and URL |
+| `make gcp-url` | Print the app URL |
+| `make gcp-logs` | Show recent Cloud Run logs |
+| `make gcp-destroy` | Destroy all GCP resources |
 
 ## Local Testing (Docker)
 
@@ -260,6 +279,48 @@ flowchart LR
 - **Identity** (`iam.tf`): user-assigned managed identity with `AcrPull` on the registry, `Storage Table Data Contributor` on the storage account, and an intentionally overly permissive `Storage Blob Data Owner` at subscription scope (mirrors the AWS `S3OverlyPermissivePolicy`).
 - **Logs**: container stdout/stderr and HTTP logs on the App Service file system (7-day retention), streamed with `make azure-logs`.
 
+## GCP Deploy
+
+Requires the Google Cloud CLI, Terraform >= 1.6, and Docker. All `gcp-*` targets first run `make gcp-login`, which runs `gcloud auth login` and `gcloud auth application-default login` (Terraform uses Application Default Credentials) if needed. The active gcloud project is used (`gcloud config set project <id>` to change it); region defaults to `us-central1` (`GCP_REGION=...` to override).
+
+```bash
+make gcp-plan
+make gcp-deploy      # prints the https://...run.app URL when done
+make gcp-destroy     # tear everything down
+```
+
+`make gcp-deploy`:
+
+1. Enables the needed APIs (`run`, `artifactregistry`, `firestore`, `iam`).
+2. Creates the Artifact Registry repository (targeted apply).
+3. Pulls `ghcr.io/kclinden/nebraska-app:latest` and pushes it to Artifact Registry (`GHCR_TAG=...` for a specific build).
+4. Applies the rest of the stack, then waits for the URL to return HTTP 200.
+
+To roll out a newer GHCR build later, run `make gcp-push`; `gcp-redeploy` runs `gcloud run deploy` with the same `:latest` tag, which resolves the new digest and creates a new revision. Cloud Run scales to zero when idle, so the first request after a while includes a short cold start.
+
+State is local in `terraform/gcp/terraform.tfstate` (gitignored).
+
+### GCP Resources
+
+```mermaid
+flowchart LR
+    Internet((Internet)) -->|HTTPS| RUN
+    subgraph Project[GCP project]
+        RUN[Cloud Run service<br/>husker-app]
+        SA[Service account<br/>husker-app-run]
+        GAR[(Artifact Registry<br/>husker-app)]
+        FS[(Firestore<br/>husker-suffix)]
+    end
+    RUN -. runs as .-> SA
+    SA -->|datastore.user| FS
+    GAR -->|pull :latest| RUN
+```
+
+- **Compute** (`cloudrun.tf`): Cloud Run v2 service `husker-app` (1 vCPU / 512 MiB, 0-1 instances) running `nebraska-app:latest` from Artifact Registry on port 5000. Public via `invoker_iam_disabled` (no `allUsers` binding, which domain-restricted sharing policies often block).
+- **Data** (`firestore.tf`): Firestore Native database `husker-<suffix>` (deletion protection off so destroy works) with collections `NebraskaPlayers` (document id = `<jersey>-<SHA-1 of name>`) and `NebraskaSchedule2026` (document id = game id), seeded from `data/*.yaml`. The app uses `STORAGE_BACKEND=firestore`.
+- **Identity** (`iam.tf`): service account `husker-app-run` with `roles/datastore.user`, plus an intentionally overly permissive project-level `roles/storage.admin` (mirrors the AWS `S3OverlyPermissivePolicy`).
+- **Logs**: Cloud Logging; `make gcp-logs` shows recent entries.
+
 ## Container Image (GitHub Actions)
 
 `.github/workflows/docker-build.yml` refreshes scores, builds the image from `app/`, and pushes it to `ghcr.io/<owner>/<repo>`. It has no cloud dependency:
@@ -269,9 +330,9 @@ flowchart LR
 - manually via **Run workflow**
 - on pull requests: builds without pushing and runs a container smoke test
 
-GitHub Actions does not deploy to any cloud; `make aws-push` / `make azure-push` copy the published image into ECR / ACR.
+GitHub Actions does not deploy to any cloud; `make aws-push` / `make azure-push` / `make gcp-push` copy the published image into ECR / ACR / Artifact Registry.
 
 ## Notes
 
 - Terraform state files are intentionally ignored by git.
-- CI validates `terraform/aws` and `terraform/azure` formatting and configuration on push and pull requests.
+- CI validates `terraform/aws`, `terraform/azure`, and `terraform/gcp` formatting and configuration on push and pull requests.

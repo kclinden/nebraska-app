@@ -17,10 +17,16 @@ export AZURE_EXTENSION_USE_DYNAMIC_INSTALL := yes_without_prompt
 # Homebrew's az on Python 3.14 prints SyntaxWarnings on every call.
 export PYTHONWARNINGS := ignore::SyntaxWarning
 
-# VERBOSE=1 adds Terraform INFO logs and az --verbose.
+# Project resolved per command from the active gcloud config (`gcloud config set project ...`).
+GCP_REGION ?= us-central1
+GCP_TF := TF_VAR_project_id=$$(gcloud config get-value project 2>/dev/null) TF_VAR_region=$(GCP_REGION) terraform -chdir=terraform/gcp
+GCP_OUT = $(shell terraform -chdir=terraform/gcp output -raw $(1) 2>/dev/null)
+
+# VERBOSE=1 adds Terraform INFO logs and az/gcloud verbose output.
 ifeq ($(VERBOSE),1)
 export TF_LOG := INFO
 AZ_FLAGS := --verbose
+GCP_FLAGS := --verbosity=info
 endif
 
 # Usage: $(call step,Message) - avoid commas in the message.
@@ -31,12 +37,14 @@ step = @printf '\n\033[1;36m==> %s\033[0m\n' "$(1)"
         aws-login aws-init aws-plan aws-deploy aws-ecr-login aws-image aws-image-local aws-push \
         aws-redeploy aws-url aws-logs aws-destroy \
         azure-login azure-init azure-plan azure-deploy azure-outputs azure-image azure-image-local \
-        azure-push azure-redeploy azure-wait azure-status azure-url azure-logs azure-destroy
+        azure-push azure-redeploy azure-wait azure-status azure-url azure-logs azure-destroy \
+        gcp-login gcp-init gcp-plan gcp-deploy gcp-outputs gcp-image gcp-image-local gcp-push \
+        gcp-redeploy gcp-wait gcp-status gcp-url gcp-logs gcp-destroy
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
-setup-check: ## Check dev tools and logins (SECTIONS="local aws azure" to limit)
+setup-check: ## Check dev tools and logins (SECTIONS="local aws azure gcp" to limit)
 	@scripts/check_setup.sh $(SECTIONS)
 
 # ---------- Local (Docker + DynamoDB Local) ----------
@@ -228,4 +236,94 @@ azure-logs: azure-outputs ## Stream the web app's container logs
 azure-destroy: azure-init ## Destroy all Azure resources
 	$(call step,Destroying Azure stack)
 	$(AZ_TF) destroy
+
+# ---------- GCP (Terraform + Cloud Run, local state) ----------
+
+gcp-login: ## Ensure gcloud and Application Default Credentials are logged in; show the project
+	$(call step,Checking gcloud login)
+	@gcloud auth print-access-token >/dev/null 2>&1 || gcloud auth login
+	@gcloud auth application-default print-access-token >/dev/null 2>&1 || gcloud auth application-default login
+	@project=$$(gcloud config get-value project 2>/dev/null); \
+		test -n "$$project" || { echo "No gcloud project set; run: gcloud config set project <project-id>" >&2; exit 1; }; \
+		echo "Project: $$project"; echo "Account: $$(gcloud config get-value account 2>/dev/null)"; echo "Region:  $(GCP_REGION)"
+
+gcp-init: gcp-login ## Enable required APIs and initialize Terraform (local state in terraform/gcp)
+	$(call step,Enabling GCP APIs)
+	gcloud services enable run.googleapis.com artifactregistry.googleapis.com firestore.googleapis.com iam.googleapis.com $(GCP_FLAGS)
+	$(call step,Initializing Terraform in terraform/gcp)
+	$(GCP_TF) init -upgrade=false
+
+gcp-plan: gcp-init ## Show the GCP Terraform plan
+	$(call step,Formatting and validating Terraform)
+	$(GCP_TF) fmt -recursive
+	$(GCP_TF) validate
+	$(call step,Planning GCP changes)
+	$(GCP_TF) plan
+
+# Artifact Registry is created first so the image exists before Cloud Run starts.
+gcp-deploy: gcp-init ## Create/update everything: Firestore, Artifact Registry, copy image from GHCR, Cloud Run
+	$(call step,[1/3] Creating Artifact Registry repository)
+	$(GCP_TF) apply -auto-approve -target=google_artifact_registry_repository.app
+	$(call step,[2/3] Copying $(GHCR_IMAGE):$(GHCR_TAG) into Artifact Registry)
+	@$(MAKE) --no-print-directory gcp-image
+	$(call step,[3/3] Applying full GCP stack)
+	$(GCP_TF) apply
+	@$(MAKE) --no-print-directory gcp-wait
+	@$(MAKE) --no-print-directory gcp-status
+	$(call step,GCP deploy complete)
+	@$(MAKE) --no-print-directory gcp-url
+
+gcp-outputs: gcp-login
+	$(eval GCP_IMAGE := $(call GCP_OUT,image))
+	$(eval GCP_SERVICE := $(call GCP_OUT,service_name))
+	$(eval GCP_URL := $(call GCP_OUT,app_url))
+	@test -n "$(GCP_IMAGE)" || { echo "No Artifact Registry repository in Terraform state; run make gcp-deploy first." >&2; exit 1; }
+	@gcloud auth configure-docker $(GCP_REGION)-docker.pkg.dev --quiet >/dev/null 2>&1
+
+gcp-image: gcp-outputs ## Copy the GHCR image (GHCR_TAG, default latest) into Artifact Registry as :latest
+	$(call step,Pulling $(GHCR_IMAGE):$(GHCR_TAG))
+	docker pull --platform linux/amd64 $(GHCR_IMAGE):$(GHCR_TAG)
+	$(call step,Pushing to $(GCP_IMAGE))
+	docker tag $(GHCR_IMAGE):$(GHCR_TAG) $(GCP_IMAGE)
+	docker push $(GCP_IMAGE)
+
+gcp-image-local: gcp-outputs scores ## Build the image from your working copy and push it to Artifact Registry as :latest
+	$(call step,Building ./app for linux/amd64)
+	docker build --platform linux/amd64 -t $(GCP_IMAGE) ./app
+	docker push $(GCP_IMAGE)
+
+gcp-push: gcp-image gcp-redeploy ## Copy the latest GHCR image to Artifact Registry and roll out Cloud Run
+
+gcp-redeploy: gcp-outputs ## Deploy a new Cloud Run revision from :latest, then wait until it serves
+	@test -n "$(GCP_SERVICE)" || { echo "No Cloud Run service in Terraform state; run make gcp-deploy first." >&2; exit 1; }
+	$(call step,Deploying new revision of $(GCP_SERVICE))
+	gcloud run deploy $(GCP_SERVICE) --image $(GCP_IMAGE) --region $(GCP_REGION) --quiet $(GCP_FLAGS)
+	@$(MAKE) --no-print-directory gcp-wait
+	@$(MAKE) --no-print-directory gcp-status
+
+# Cloud Run scales to zero, so the first request may include a cold start.
+gcp-wait: gcp-outputs
+	$(call step,Waiting for $(GCP_URL) to return 200 (checks every 10s; up to 5 min))
+	@for i in $$(seq 1 30); do \
+		code=$$(curl -s -o /dev/null -m 30 -w '%{http_code}' "$(GCP_URL)/"); \
+		printf '  %s  HTTP %s\n' "$$(date +%H:%M:%S)" "$$code"; \
+		[ "$$code" = 200 ] && exit 0; \
+		sleep 10; \
+	done; echo "Service did not become healthy; see make gcp-logs" >&2; exit 1
+
+gcp-status: gcp-outputs ## Show the Cloud Run service's ready revision, image, and URL
+	$(call step,Cloud Run service $(GCP_SERVICE))
+	@gcloud run services describe $(GCP_SERVICE) --region $(GCP_REGION) \
+		--format='table(status.latestReadyRevisionName:label=REVISION, status.conditions[0].status:label=READY, spec.template.spec.containers[0].image:label=IMAGE, status.url:label=URL)'
+
+gcp-url: gcp-login ## Print the GCP app URL
+	@url=$$(terraform -chdir=terraform/gcp output -raw app_url 2>/dev/null); echo "App URL: $${url:-(not deployed; run make gcp-deploy)}"
+
+gcp-logs: gcp-outputs ## Show recent Cloud Run logs
+	$(call step,Recent logs for $(GCP_SERVICE))
+	gcloud run services logs read $(GCP_SERVICE) --region $(GCP_REGION) --limit 100
+
+gcp-destroy: gcp-init ## Destroy all GCP resources
+	$(call step,Destroying GCP stack)
+	$(GCP_TF) destroy
 
