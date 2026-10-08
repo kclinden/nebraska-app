@@ -20,5 +20,5 @@ override.tf.json
 terraform.rc
 *.tfplan
 
-# Local backend configuration (contains account-specific values)
-terraform/backend.hcl
+# Generated at build time by scripts/update_scores.py
+app/scores.json

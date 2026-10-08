@@ -1,0 +1,36 @@
+# Local test stack: DynamoDB Local + seeder + app. Run with: docker compose up --build
+x-local-aws: &local-aws
+  AWS_ENDPOINT_URL_DYNAMODB: http://dynamodb-local:8000
+  AWS_REGION: us-east-1
+  # Dummy credentials; DynamoDB Local doesn't validate them.
+  AWS_ACCESS_KEY_ID: local
+  AWS_SECRET_ACCESS_KEY: local
+
+services:
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+    ports:
+      - "8000:8000"
+
+  seed:
+    image: python:3.12-slim
+    depends_on:
+      - dynamodb-local
+    environment:
+      <<: *local-aws
+      DATA_DIR: /data
+    volumes:
+      - ./scripts:/scripts:ro
+      - ./data:/data:ro
+    command: sh -c "pip install -q --root-user-action=ignore boto3 pyyaml && python /scripts/seed_local_dynamodb.py"
+
+  app:
+    build: ./app
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    environment:
+      <<: *local-aws
+    ports:
+      - "8080:5000"
