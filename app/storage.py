@@ -1,4 +1,5 @@
 """Roster/schedule storage: DynamoDB (AWS and local) or Azure Table Storage, chosen by STORAGE_BACKEND."""
+import hashlib
 import os
 
 PLAYERS_TABLE = "NebraskaPlayers"
@@ -27,7 +28,7 @@ class DynamoStore:
 
 
 class AzureTableStore:
-    """Players: PartitionKey=jersey, RowKey=name. Games: PartitionKey=season, RowKey=game id."""
+    """Players: PartitionKey=jersey, RowKey=sha1(name). Games: PartitionKey=season, RowKey=game id."""
 
     def __init__(self):
         from azure.data.tables import TableServiceClient
@@ -52,12 +53,17 @@ class AzureTableStore:
 
     def add_player(self, jersey, name, position):
         self.players.upsert_entity({
-            "PartitionKey": str(jersey), "RowKey": name,
+            "PartitionKey": str(jersey), "RowKey": _row_key(name),
             "JerseyNumber": str(jersey), "Name": name, "Position": position,
         })
 
     def delete_player(self, jersey, name):
-        self.players.delete_entity(partition_key=str(jersey), row_key=name)
+        self.players.delete_entity(partition_key=str(jersey), row_key=_row_key(name))
+
+
+def _row_key(name):
+    # Matches sha1() in terraform/azure/storage.tf; avoids characters Table Storage keys can't handle.
+    return hashlib.sha1(name.encode()).hexdigest()
 
 
 def get_store():

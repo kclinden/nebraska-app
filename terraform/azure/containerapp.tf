@@ -19,6 +19,11 @@ resource "azurerm_container_app_environment" "app" {
   resource_group_name        = azurerm_resource_group.main.name
   location                   = azurerm_resource_group.main.location
   log_analytics_workspace_id = azurerm_log_analytics_workspace.app.id
+
+  # Azure adds a default Consumption workload profile after creation.
+  lifecycle {
+    ignore_changes = [workload_profile]
+  }
 }
 
 resource "azurerm_container_app" "app" {
@@ -81,9 +86,9 @@ resource "azurerm_container_app" "app" {
     }
   }
 
-  # `make azure-redeploy` sets a new revision suffix to re-pull :latest.
+  # `make azure-redeploy` sets a new revision suffix to re-pull :latest; Azure assigns the Consumption profile.
   lifecycle {
-    ignore_changes = [template[0].revision_suffix]
+    ignore_changes = [template[0].revision_suffix, workload_profile_name]
   }
 
   depends_on = [azurerm_role_assignment.acr_pull, azurerm_role_assignment.table_data]
