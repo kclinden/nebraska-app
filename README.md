@@ -51,7 +51,7 @@ flowchart LR
     end
 
     subgraph Azure
-        ACA[Container Apps<br/>HTTPS ingress] --> Tables[(Table Storage)]
+        ACA[App Service<br/>Linux B1, HTTPS] --> Tables[(Table Storage)]
         ACR[(ACR)] --> ACA
     end
 
@@ -69,7 +69,7 @@ flowchart LR
 ```mermaid
 sequenceDiagram
     participant B as Browser
-    participant F as Front door<br/>(ALB / Container Apps ingress)
+    participant F as Front door<br/>(ALB / App Service front end)
     participant A as Flask app (gunicorn)
     participant S as Storage<br/>(DynamoDB / Table Storage)
     B->>F: GET /
@@ -87,13 +87,13 @@ sequenceDiagram
 
 | Component | Local | AWS | Azure |
 | --- | --- | --- | --- |
-| Container runtime | Docker Compose | ECS Fargate (0.25 vCPU / 512 MB) | Container Apps (0.25 vCPU / 0.5 GiB) |
+| Container runtime | Docker Compose | ECS Fargate (0.25 vCPU / 512 MB) | App Service, Linux B1 plan (1 vCPU / 1.75 GB) |
 | Ingress | `localhost:8080` | ALB, HTTP :80 | Managed HTTPS ingress |
 | Image source | Local build | ECR (copied from GHCR) | ACR (imported from GHCR) |
 | Data | DynamoDB Local (in-memory) | DynamoDB | Table Storage |
 | App identity | Dummy keys | ECS task role | User-assigned managed identity |
-| Network | Compose network | VPC, 2 public subnets, IGW | Container Apps environment |
-| Logs | `docker compose logs` | CloudWatch `/ecs/husker-app` | Log Analytics `log-husker-app` |
+| Network | Compose network | VPC, 2 public subnets, IGW | App Service multi-tenant front end |
+| Logs | `docker compose logs` | CloudWatch `/ecs/husker-app` | App Service log stream (`make azure-logs`) |
 | Infra code | `docker-compose.yml` | `terraform/aws` | `terraform/azure` |
 
 GitHub Actions only builds and publishes to GHCR; it has no cloud credentials. Deployments are pulled into each cloud by `make aws-deploy` / `make azure-deploy` (and `*-push` for updates), so the build never depends on the state of AWS or Azure.
@@ -105,7 +105,7 @@ GitHub Actions only builds and publishes to GHCR; it has no cloud credentials. D
 - `scripts/` developer setup check, score fetcher, and DynamoDB Local seeder
 - `docs/` README assets (app screenshot)
 - `terraform/aws/` AWS stack (VPC, ECS Fargate, ALB, ECR, DynamoDB, IAM)
-- `terraform/azure/` Azure stack (Container Apps, ACR, Table Storage, managed identity)
+- `terraform/azure/` Azure stack (App Service, ACR, Table Storage, managed identity)
 - `docker-compose.yml` local test stack
 - `Makefile` shortcuts for local, AWS, and Azure workflows (run `make help`)
 
@@ -131,12 +131,13 @@ GitHub Actions only builds and publishes to GHCR; it has no cloud credentials. D
 | `make aws-destroy` | Destroy all AWS resources |
 | `make azure-login` | Ensure the Azure CLI has a valid login (runs `az login` if not) |
 | `make azure-plan` | Register providers, `fmt`, `validate`, and `plan` |
-| `make azure-deploy` | Create/update the full stack, import the GHCR image into ACR, and deploy the Container App |
-| `make azure-push` | Import the latest GHCR image into ACR and roll out a new revision |
+| `make azure-deploy` | Create/update the full stack, import the GHCR image into ACR, deploy the web app, and wait for HTTP 200 |
+| `make azure-push` | Import the latest GHCR image into ACR and restart the web app |
 | `make azure-image-local` | Build from your working copy in ACR (then `make azure-redeploy`) |
-| `make azure-redeploy` | Create a new Container App revision so it re-pulls `:latest` |
+| `make azure-redeploy` | Restart the web app so it re-pulls `:latest`, then wait for HTTP 200 |
+| `make azure-status` | Show the web app's state, host name, and image |
 | `make azure-url` | Print the app URL |
-| `make azure-logs` | Stream the Container App's console logs |
+| `make azure-logs` | Stream the web app's container logs |
 | `make azure-destroy` | Destroy all Azure resources |
 
 ## Local Testing (Docker)
@@ -226,12 +227,12 @@ make azure-destroy   # tear everything down
 
 `make azure-deploy`:
 
-1. Registers the needed resource providers (`Microsoft.App`, `ContainerRegistry`, `ManagedIdentity`, `OperationalInsights`, `Storage`).
+1. Registers the needed resource providers (`Microsoft.Web`, `ContainerRegistry`, `ManagedIdentity`, `Storage`).
 2. Creates the resource group and ACR (targeted apply).
 3. Imports `ghcr.io/kclinden/nebraska-app:latest` into ACR with `az acr import` (`GHCR_TAG=...` for a specific build).
 4. Applies the rest of the stack.
 
-To roll out a newer GHCR build later, run `make azure-push`. Container Apps only re-pull `:latest` on a new revision, so `azure-redeploy` sets a unique revision suffix.
+To roll out a newer GHCR build later, run `make azure-push`. App Service pulls the image again when the app restarts, so `azure-redeploy` restarts it and polls the URL until it returns 200. The app service plan is billed while it exists (B1 is roughly $13/month); `make azure-destroy` removes it. Override the tier with `TF_VAR_app_service_sku=B2`.
 
 State is local in `terraform/azure/terraform.tfstate` (gitignored). Region defaults to `centralus` (`TF_VAR_location=eastus` to override).
 
@@ -239,27 +240,25 @@ State is local in `terraform/azure/terraform.tfstate` (gitignored). Region defau
 
 ```mermaid
 flowchart LR
-    Internet((Internet)) -->|HTTPS| ACA
+    Internet((Internet)) -->|HTTPS| APP
     subgraph RG[rg-husker-app]
-        subgraph CAE[Container Apps environment]
-            ACA[Container App<br/>husker-app]
+        subgraph ASP[App Service plan asp-husker-app - Linux B1]
+            APP[Web app<br/>husker-app-suffix]
         end
         MI[Managed identity<br/>id-husker-app]
         ACR[(ACR)]
         ST[(Storage account<br/>Table Storage)]
-        LAW[Log Analytics]
     end
-    ACA -. uses .-> MI
+    APP -. uses .-> MI
     MI -->|AcrPull| ACR
     MI -->|Table Data Contributor| ST
-    ACR -->|pull :latest| ACA
-    ACA --> LAW
+    ACR -->|pull :latest| APP
 ```
 
-- **Compute** (`containerapp.tf`): Container Apps environment + app `husker-app` (1 replica, 0.25 vCPU / 0.5 GiB) with external HTTPS ingress to port 5000. Image pulled from ACR (Basic, admin user disabled) using the app's managed identity.
-- **Data** (`storage.tf`): Storage account with tables `NebraskaPlayers` (PartitionKey = jersey, RowKey = name) and `NebraskaSchedule2026` (PartitionKey = `2026`, RowKey = game id), seeded from `data/*.yaml`. The app uses `STORAGE_BACKEND=azure_table` and authenticates with the managed identity (no keys).
+- **Compute** (`appservice.tf`): Linux App Service plan (`B1` by default, `app_service_sku`) and web app `husker-app-<suffix>` running `nebraska-app:latest` from ACR (Basic, admin user disabled), pulled with the managed identity. HTTPS only, TLS 1.2+, FTP/Web Deploy basic auth disabled, Always On, and a health check on `/nebraska_football.png`. `WEBSITES_PORT=5000` routes traffic to gunicorn.
+- **Data** (`storage.tf`): Storage account with tables `NebraskaPlayers` (PartitionKey = jersey, RowKey = SHA-1 of the name) and `NebraskaSchedule2026` (PartitionKey = `2026`, RowKey = game id), seeded from `data/*.yaml`. The app uses `STORAGE_BACKEND=azure_table` and authenticates with the managed identity (no keys).
 - **Identity** (`iam.tf`): user-assigned managed identity with `AcrPull` on the registry, `Storage Table Data Contributor` on the storage account, and an intentionally overly permissive `Storage Blob Data Owner` at subscription scope (mirrors the AWS `S3OverlyPermissivePolicy`).
-- **Logs**: Log Analytics workspace `log-husker-app` (30-day retention).
+- **Logs**: container stdout/stderr and HTTP logs on the App Service file system (7-day retention), streamed with `make azure-logs`.
 
 ## Container Image (GitHub Actions)
 

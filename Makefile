@@ -31,7 +31,7 @@ step = @printf '\n\033[1;36m==> %s\033[0m\n' "$(1)"
         aws-login aws-init aws-plan aws-deploy aws-ecr-login aws-image aws-image-local aws-push \
         aws-redeploy aws-url aws-logs aws-destroy \
         azure-login azure-init azure-plan azure-deploy azure-outputs azure-image azure-image-local \
-        azure-push azure-redeploy azure-status azure-url azure-logs azure-destroy
+        azure-push azure-redeploy azure-wait azure-status azure-url azure-logs azure-destroy
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -141,7 +141,7 @@ aws-destroy: aws-init ## Destroy all AWS resources
 	$(call step,Destroying AWS stack)
 	$(TF) destroy
 
-# ---------- Azure (Terraform + Container Apps, local state) ----------
+# ---------- Azure (Terraform + App Service, local state) ----------
 
 azure-login: ## Ensure the Azure CLI has a valid login and show the active subscription
 	$(call step,Checking Azure CLI login)
@@ -151,7 +151,7 @@ azure-login: ## Ensure the Azure CLI has a valid login and show the active subsc
 
 azure-init: azure-login ## Register resource providers and initialize Terraform (local state in terraform/azure)
 	$(call step,Registering Azure resource providers)
-	@for ns in Microsoft.App Microsoft.ContainerRegistry Microsoft.ManagedIdentity Microsoft.OperationalInsights Microsoft.Storage; do \
+	@for ns in Microsoft.Web Microsoft.ContainerRegistry Microsoft.ManagedIdentity Microsoft.Storage; do \
 		printf '  %-32s ' "$$ns"; \
 		az provider register --namespace $$ns --wait -o none $(AZ_FLAGS) && az provider show --namespace $$ns --query registrationState -o tsv; \
 	done
@@ -165,14 +165,15 @@ azure-plan: azure-init ## Show the Azure Terraform plan
 	$(call step,Planning Azure changes)
 	$(AZ_TF) plan
 
-# ACR is created first so the image exists before the container app starts.
-azure-deploy: azure-init ## Create/update everything: storage, ACR, import image from GHCR, Container App
+# ACR is created first so the image exists before the web app starts.
+azure-deploy: azure-init ## Create/update everything: storage, ACR, import image from GHCR, App Service
 	$(call step,[1/3] Creating resource group and ACR)
 	$(AZ_TF) apply -auto-approve -target=azurerm_container_registry.app
 	$(call step,[2/3] Importing $(GHCR_IMAGE):$(GHCR_TAG) into ACR)
 	@$(MAKE) --no-print-directory azure-image
 	$(call step,[3/3] Applying full Azure stack)
 	$(AZ_TF) apply
+	@$(MAKE) --no-print-directory azure-wait
 	@$(MAKE) --no-print-directory azure-status
 	$(call step,Azure deploy complete)
 	@$(MAKE) --no-print-directory azure-url
@@ -180,7 +181,8 @@ azure-deploy: azure-init ## Create/update everything: storage, ACR, import image
 azure-outputs: azure-login
 	$(eval AZ_RG := $(shell terraform -chdir=terraform/azure output -raw resource_group_name 2>/dev/null))
 	$(eval AZ_ACR := $(shell terraform -chdir=terraform/azure output -raw acr_name 2>/dev/null))
-	$(eval AZ_APP := $(shell terraform -chdir=terraform/azure output -raw container_app_name 2>/dev/null))
+	$(eval AZ_APP := $(shell terraform -chdir=terraform/azure output -raw web_app_name 2>/dev/null))
+	$(eval AZ_URL := $(shell terraform -chdir=terraform/azure output -raw app_url 2>/dev/null))
 	@test -n "$(AZ_ACR)" || { echo "No ACR in Terraform state; run make azure-deploy first." >&2; exit 1; }
 
 azure-image: azure-outputs ## Import the GHCR image (GHCR_TAG, default latest) into ACR as :latest
@@ -192,25 +194,36 @@ azure-image-local: azure-outputs scores ## Build the image from your working cop
 	$(call step,Building ./app in $(AZ_ACR) (ACR Tasks))
 	az acr build --registry $(AZ_ACR) --platform linux/amd64 --image nebraska-app:latest --image nebraska-app:sha-$(IMAGE_TAG) $(AZ_FLAGS) ./app
 
-azure-push: azure-image azure-redeploy ## Import the latest GHCR image into ACR and roll out the Container App
+azure-push: azure-image azure-redeploy ## Import the latest GHCR image into ACR and restart the web app
 
-azure-redeploy: azure-outputs ## Create a new Container App revision so it re-pulls :latest
-	@test -n "$(AZ_APP)" || { echo "No Container App in Terraform state; run make azure-deploy first." >&2; exit 1; }
-	$(call step,Creating new revision of $(AZ_APP) in $(AZ_RG))
-	az containerapp update --name $(AZ_APP) --resource-group $(AZ_RG) --revision-suffix r$$(date +%s) -o none $(AZ_FLAGS)
+azure-redeploy: azure-outputs ## Restart the web app so it re-pulls :latest, then wait until it serves
+	@test -n "$(AZ_APP)" || { echo "No web app in Terraform state; run make azure-deploy first." >&2; exit 1; }
+	$(call step,Restarting $(AZ_APP) in $(AZ_RG))
+	az webapp restart --name $(AZ_APP) --resource-group $(AZ_RG) $(AZ_FLAGS)
+	@$(MAKE) --no-print-directory azure-wait
 	@$(MAKE) --no-print-directory azure-status
 
-azure-status: azure-outputs ## Show active Container App revisions and their health
-	$(call step,Active revisions for $(AZ_APP))
-	@az containerapp revision list --name $(AZ_APP) --resource-group $(AZ_RG) \
-		--query "[?properties.active].{revision:name, created:properties.createdTime, health:properties.healthState, running:properties.runningState, replicas:properties.replicas, image:properties.template.containers[0].image}" -o table
+# The first request after a (re)start pulls the image and boots the container.
+azure-wait: azure-outputs
+	$(call step,Waiting for $(AZ_URL) to return 200 (checks every 10s; up to 10 min))
+	@for i in $$(seq 1 60); do \
+		code=$$(curl -s -o /dev/null -m 30 -w '%{http_code}' "$(AZ_URL)/"); \
+		printf '  %s  HTTP %s\n' "$$(date +%H:%M:%S)" "$$code"; \
+		[ "$$code" = 200 ] && exit 0; \
+		sleep 10; \
+	done; echo "App did not become healthy; see make azure-logs" >&2; exit 1
+
+azure-status: azure-outputs ## Show the web app's state, image, and plan
+	$(call step,Web app $(AZ_APP))
+	@az webapp show --name $(AZ_APP) --resource-group $(AZ_RG) \
+		--query "{state:state, host:defaultHostName, image:siteConfig.linuxFxVersion, httpsOnly:httpsOnly, lastModified:lastModifiedTimeUtc}" -o table
 
 azure-url: azure-login ## Print the Azure app URL
 	@url=$$(terraform -chdir=terraform/azure output -raw app_url 2>/dev/null); echo "App URL: $${url:-(not deployed; run make azure-deploy)}"
 
-azure-logs: azure-outputs ## Stream the Container App's console logs
+azure-logs: azure-outputs ## Stream the web app's container logs
 	$(call step,Streaming $(AZ_APP) logs (Ctrl-C to stop))
-	az containerapp logs show --name $(AZ_APP) --resource-group $(AZ_RG) --follow
+	az webapp log tail --name $(AZ_APP) --resource-group $(AZ_RG)
 
 azure-destroy: azure-init ## Destroy all Azure resources
 	$(call step,Destroying Azure stack)
