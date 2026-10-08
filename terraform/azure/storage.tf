@@ -18,13 +18,13 @@ resource "azurerm_storage_account" "data" {
 }
 
 resource "azurerm_storage_table" "players" {
-  name                 = "NebraskaPlayers"
-  storage_account_name = azurerm_storage_account.data.name
+  name               = "NebraskaPlayers"
+  storage_account_id = azurerm_storage_account.data.id
 }
 
 resource "azurerm_storage_table" "schedule" {
-  name                 = "NebraskaSchedule2026"
-  storage_account_name = azurerm_storage_account.data.name
+  name               = "NebraskaSchedule2026"
+  storage_account_id = azurerm_storage_account.data.id
 }
 
 resource "azurerm_storage_table_entity" "roster_items" {
@@ -32,7 +32,8 @@ resource "azurerm_storage_table_entity" "roster_items" {
 
   storage_table_id = azurerm_storage_table.players.id
   partition_key    = tostring(each.value.jersey)
-  row_key          = each.value.name
+  # Hashed because the provider fails on keys containing quotes (e.g. D'Onofrio); must match app/storage.py.
+  row_key = sha1(each.value.name)
 
   entity = {
     JerseyNumber = tostring(each.value.jersey)
