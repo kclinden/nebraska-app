@@ -2,11 +2,108 @@
 
 Husker football roster and schedule app (Flask), packaged as a container and deployable locally, to AWS, or to Azure.
 
+## Overview
+
+![Nebraska App - schedule with game stats expanded](docs/app-screenshot.png)
+
+- **Schedule (default tab)**: 2026 games with date, opponent, location, and home/away. Completed games show the final score and a **Stats** button that expands team stats (yards, first downs, 3rd-down efficiency, turnovers, penalties, possession) and Husker passing/rushing/receiving leaders.
+- **Roster**: players sorted by jersey number, with add and remove.
+- **Program Legacy**: national/conference titles, Heisman winners, all-time wins, and the sellout streak, next to a Memorial Stadium photo.
+- **Play Hail Varsity**: plays the fight song in the browser (Web Audio).
+
+Scores and stats come from ESPN and are baked into the image at build time; the weekly GitHub Actions build refreshes them after each game. Roster and schedule live in DynamoDB (AWS/local) or Azure Table Storage.
+
+## Getting Started
+
+```bash
+make setup-check   # verify tools and logins; prints fix commands for anything missing
+make local-up      # http://localhost:8080
+```
+
+`make setup-check` (or `scripts/check_setup.sh [local] [aws] [azure]`) checks git, make, curl, Python, Docker (daemon, `linux/amd64` builds, Compose), ESPN reachability, Terraform >= 1.6, AWS CLI v2 with the SSO profile and session, Azure CLI and login, and the GitHub CLI. It exits non-zero if a required tool is missing.
+
+## Architecture
+
+One container image runs everywhere; only the data backend changes, selected by `STORAGE_BACKEND` in `app/storage.py`.
+
+```mermaid
+flowchart LR
+    ESPN[(ESPN public API)]
+    subgraph GH[GitHub]
+        Repo[Repository] --> GHA[Docker Build workflow<br/>push / weekly / manual]
+        GHA --> GHCR[(GHCR<br/>nebraska-app:latest)]
+    end
+    ESPN -- scores + stats --> GHA
+
+    subgraph Dev[Developer machine]
+        Make[make targets]
+        subgraph Compose[docker compose]
+            LocalApp[app container] --> DDBL[(DynamoDB Local)]
+            Seed[seed job] --> DDBL
+        end
+    end
+    Data[data/*.yaml<br/>roster + schedule] --> Seed
+
+    subgraph AWS
+        ALB[Application Load Balancer] --> ECS[ECS Fargate<br/>husker-app]
+        ECR[(ECR)] --> ECS
+        ECS --> DDB[(DynamoDB)]
+    end
+
+    subgraph Azure
+        ACA[Container Apps<br/>HTTPS ingress] --> Tables[(Table Storage)]
+        ACR[(ACR)] --> ACA
+    end
+
+    GHCR -- make aws-push --> ECR
+    GHCR -- make azure-push<br/>az acr import --> ACR
+    Data -- terraform --> DDB
+    Data -- terraform --> Tables
+    Make --> Compose
+    Users((Fans)) --> ALB
+    Users --> ACA
+```
+
+### Request flow
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant F as Front door<br/>(ALB / Container Apps ingress)
+    participant A as Flask app (gunicorn)
+    participant S as Storage<br/>(DynamoDB / Table Storage)
+    B->>F: GET /
+    F->>A: forward to :5000
+    A->>S: list players, list games
+    S-->>A: items
+    A->>A: merge baked-in scores.json (ESPN)
+    A-->>B: HTML (schedule, stats, roster)
+    B->>A: POST /add or /delete
+    A->>S: put / delete player
+    A-->>B: redirect to #roster
+```
+
+### Components
+
+| Component | Local | AWS | Azure |
+| --- | --- | --- | --- |
+| Container runtime | Docker Compose | ECS Fargate (0.25 vCPU / 512 MB) | Container Apps (0.25 vCPU / 0.5 GiB) |
+| Ingress | `localhost:8080` | ALB, HTTP :80 | Managed HTTPS ingress |
+| Image source | Local build | ECR (copied from GHCR) | ACR (imported from GHCR) |
+| Data | DynamoDB Local (in-memory) | DynamoDB | Table Storage |
+| App identity | Dummy keys | ECS task role | User-assigned managed identity |
+| Network | Compose network | VPC, 2 public subnets, IGW | Container Apps environment |
+| Logs | `docker compose logs` | CloudWatch `/ecs/husker-app` | Log Analytics `log-husker-app` |
+| Infra code | `docker-compose.yml` | `terraform/aws` | `terraform/azure` |
+
+GitHub Actions only builds and publishes to GHCR; it has no cloud credentials. Deployments are pulled into each cloud by `make aws-deploy` / `make azure-deploy` (and `*-push` for updates), so the build never depends on the state of AWS or Azure.
+
 ## Repository Layout
 
 - `app/` application source, `Dockerfile`, and related assets; `storage.py` selects DynamoDB or Azure Table Storage via `STORAGE_BACKEND`
 - `data/` roster and schedule YAML, shared by local seeding and every cloud stack
-- `scripts/` score fetcher and DynamoDB Local seeder
+- `scripts/` developer setup check, score fetcher, and DynamoDB Local seeder
+- `docs/` README assets (app screenshot)
 - `terraform/aws/` AWS stack (VPC, ECS Fargate, ALB, ECR, DynamoDB, IAM)
 - `terraform/azure/` Azure stack (Container Apps, ACR, Table Storage, managed identity)
 - `docker-compose.yml` local test stack
@@ -16,6 +113,7 @@ Husker football roster and schedule app (Flask), packaged as a container and dep
 
 | Target | Description |
 | --- | --- |
+| `make setup-check` | Check required tools and logins, with fix suggestions (`SECTIONS="local aws"` to limit) |
 | `make local-up` | Fetch scores, build, and start the local stack at http://localhost:8080 |
 | `make local-down` | Stop the local stack |
 | `make local-restart` | Rebuild and restart with fresh data |
@@ -94,7 +192,20 @@ To roll out a newer GHCR build later (e.g. after the weekly score refresh), run 
 
 Terraform uses **local state** in `terraform/aws/terraform.tfstate` (gitignored). There is no remote backend; keep the file on the machine that deploys, or run `make aws-destroy` before deleting it.
 
-### Architecture
+### AWS Resources
+
+```mermaid
+flowchart LR
+    Internet((Internet)) -->|HTTP :80| ALB
+    subgraph VPC[VPC 10.20.0.0/16 + IGW]
+        subgraph Pub[Public subnets x2 AZs]
+            ALB[ALB<br/>HuskerAppWebSG] -->|:5000| Task[Fargate task<br/>HuskerAppTaskSG]
+        end
+    end
+    ECR[(ECR nebraska-app)] -->|pull :latest| Task
+    Task -->|task role| DDB[(DynamoDB<br/>NebraskaPlayers<br/>NebraskaSchedule2026)]
+    Task --> CW[CloudWatch Logs]
+```
 
 - **Network** (`network.tf`): VPC (`10.20.0.0/16` by default, `vpc_cidr`), internet gateway, and two public `/24` subnets in the first two AZs with a default route to the IGW. No NAT gateway.
 - **Compute** (`ecs.tf`): ECS Fargate service `husker-app` (1 task, 0.25 vCPU / 512 MB) running `nebraska-app:latest` from ECR, with deployment circuit breaker and rollback. Tasks get a public IP for outbound access; their security group only admits the ALB on port 5000.
@@ -124,7 +235,26 @@ To roll out a newer GHCR build later, run `make azure-push`. Container Apps only
 
 State is local in `terraform/azure/terraform.tfstate` (gitignored). Region defaults to `centralus` (`TF_VAR_location=eastus` to override).
 
-### Architecture
+### Azure Resources
+
+```mermaid
+flowchart LR
+    Internet((Internet)) -->|HTTPS| ACA
+    subgraph RG[rg-husker-app]
+        subgraph CAE[Container Apps environment]
+            ACA[Container App<br/>husker-app]
+        end
+        MI[Managed identity<br/>id-husker-app]
+        ACR[(ACR)]
+        ST[(Storage account<br/>Table Storage)]
+        LAW[Log Analytics]
+    end
+    ACA -. uses .-> MI
+    MI -->|AcrPull| ACR
+    MI -->|Table Data Contributor| ST
+    ACR -->|pull :latest| ACA
+    ACA --> LAW
+```
 
 - **Compute** (`containerapp.tf`): Container Apps environment + app `husker-app` (1 replica, 0.25 vCPU / 0.5 GiB) with external HTTPS ingress to port 5000. Image pulled from ACR (Basic, admin user disabled) using the app's managed identity.
 - **Data** (`storage.tf`): Storage account with tables `NebraskaPlayers` (PartitionKey = jersey, RowKey = name) and `NebraskaSchedule2026` (PartitionKey = `2026`, RowKey = game id), seeded from `data/*.yaml`. The app uses `STORAGE_BACKEND=azure_table` and authenticates with the managed identity (no keys).
