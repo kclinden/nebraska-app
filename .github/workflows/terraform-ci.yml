@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        cloud: [aws, azure]
+        cloud: [aws, azure, gcp]
     defaults:
       run:
         working-directory: terraform/${{ matrix.cloud }}

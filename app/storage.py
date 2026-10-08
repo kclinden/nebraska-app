@@ -1,4 +1,4 @@
-"""Roster/schedule storage: DynamoDB (AWS and local) or Azure Table Storage, chosen by STORAGE_BACKEND."""
+"""Roster/schedule storage chosen by STORAGE_BACKEND: DynamoDB (AWS and local), Azure Table Storage, or Firestore."""
 import hashlib
 import os
 
@@ -62,11 +62,41 @@ class AzureTableStore:
 
 
 def _row_key(name):
-    # Matches sha1() in terraform/azure/storage.tf; avoids characters Table Storage keys can't handle.
+    # Matches sha1() in terraform/azure/storage.tf and terraform/gcp/firestore.tf; avoids characters keys can't handle.
     return hashlib.sha1(name.encode()).hexdigest()
 
 
+class FirestoreStore:
+    """Player doc id = '<jersey>-<sha1(name)>'; game doc id = game id."""
+
+    def __init__(self):
+        from google.cloud import firestore
+
+        client = firestore.Client(
+            project=os.environ.get("GOOGLE_CLOUD_PROJECT"), database=os.environ["FIRESTORE_DATABASE"]
+        )
+        self.players = client.collection(PLAYERS_TABLE)
+        self.schedule = client.collection(SCHEDULE_TABLE)
+
+    def list_players(self):
+        return [d.to_dict() for d in self.players.stream()]
+
+    def list_games(self):
+        return [d.to_dict() for d in self.schedule.stream()]
+
+    def add_player(self, jersey, name, position):
+        self.players.document(f"{jersey}-{_row_key(name)}").set(
+            {"JerseyNumber": jersey, "Name": name, "Position": position}
+        )
+
+    def delete_player(self, jersey, name):
+        self.players.document(f"{jersey}-{_row_key(name)}").delete()
+
+
 def get_store():
-    if os.environ.get("STORAGE_BACKEND", "dynamodb") == "azure_table":
+    backend = os.environ.get("STORAGE_BACKEND", "dynamodb")
+    if backend == "azure_table":
         return AzureTableStore()
+    if backend == "firestore":
+        return FirestoreStore()
     return DynamoStore()
