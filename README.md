@@ -23,13 +23,13 @@ Husker football roster and schedule app (Flask + DynamoDB), packaged as a contai
 | `make scores` | Refresh `app/scores.json` from ESPN |
 | `make aws-login` | Ensure an AWS SSO session is active (runs `aws sso login` if expired) |
 | `make aws-plan` | `fmt`, `validate`, and `plan` |
-| `make aws-deploy` | Create/update the full stack, push the image, roll out ECS, and link GitHub Actions |
-| `make aws-push` | Build the image locally, push to ECR, and roll out ECS |
+| `make aws-deploy` | Create/update the full stack, copy the GHCR image to ECR, and roll out ECS |
+| `make aws-push` | Copy the latest GHCR image to ECR and roll out ECS |
+| `make aws-image-local` | Build from your working copy and push to ECR (then `make aws-redeploy`) |
 | `make aws-redeploy` | Restart the ECS service on the current `:latest` image |
 | `make aws-url` | Print the app URL |
 | `make aws-logs` | Tail the app's CloudWatch logs |
-| `make aws-destroy` | Destroy all AWS resources and remove the GitHub `AWS_ROLE_ARN` variable |
-| `make gh-setup` | Set the `AWS_ROLE_ARN`/`AWS_REGION` repo variables from Terraform outputs |
+| `make aws-destroy` | Destroy all AWS resources |
 
 ## Local Testing (Docker)
 
@@ -61,7 +61,7 @@ AWS_ACCESS_KEY_ID=local AWS_SECRET_ACCESS_KEY=local \
 
 ## AWS Deploy
 
-Requires the AWS CLI with an SSO profile, Terraform >= 1.6, Docker, and optionally the GitHub CLI (`gh`). All `aws-*` targets first run `make aws-login`, which opens `aws sso login` if the session has expired. The profile defaults to `master`; override with `AWS_PROFILE=member`. Region defaults to `us-east-1`; override with `AWS_REGION=us-west-2`.
+Requires the AWS CLI with an SSO profile, Terraform >= 1.6, and Docker. All `aws-*` targets first run `make aws-login`, which opens `aws sso login` if the session has expired. The profile defaults to `master`; override with `AWS_PROFILE=member`. Region defaults to `us-east-1`; override with `AWS_REGION=us-west-2`.
 
 ```bash
 make aws-plan
@@ -74,10 +74,11 @@ The stack deploys into a blank account/region; it creates its own networking and
 `make aws-deploy` runs in this order so the service never starts without an image:
 
 1. Create the ECR repository (targeted apply).
-2. Build the image locally (`linux/amd64`) and push `:latest` and `:sha-<commit>`.
+2. Pull `ghcr.io/kclinden/nebraska-app:latest` (published by the Docker Build workflow) and push it to ECR as `:latest`. Use `GHCR_TAG=sha-<full-commit>` to deploy a specific build.
 3. Apply the rest of the stack.
 4. Force a new ECS deployment and wait for it to become stable.
-5. Set GitHub repo variables via `make gh-setup` (skipped with a message if `gh` isn't installed).
+
+To roll out a newer GHCR build later (e.g. after the weekly score refresh), run `make aws-push`. To test uncommitted changes, run `make aws-image-local aws-redeploy`.
 
 ### State
 
@@ -89,25 +90,19 @@ Terraform uses **local state** in `terraform/aws/terraform.tfstate` (gitignored)
 - **Compute** (`ecs.tf`): ECS Fargate service `husker-app` (1 task, 0.25 vCPU / 512 MB) running `nebraska-app:latest` from ECR, with deployment circuit breaker and rollback. Tasks get a public IP for outbound access; their security group only admits the ALB on port 5000.
 - **Load balancer**: internet-facing ALB on port 80 across both public subnets.
 - **Data** (`db.tf`): DynamoDB tables `NebraskaPlayers` and `NebraskaSchedule2026`, seeded from `data/*.yaml`.
-- **IAM** (`iam.tf`): task execution role (pull image, write logs), task role (DynamoDB read/write + `S3OverlyPermissivePolicy`), and a GitHub OIDC role limited to pushing to the ECR repo and updating the service.
+- **IAM** (`iam.tf`): task execution role (pull image, write logs), task role (DynamoDB read/write + `S3OverlyPermissivePolicy`).
 - **Logs**: CloudWatch `/ecs/husker-app` (30-day retention).
 
-## Container Image and Deploy (GitHub Actions)
+## Container Image (GitHub Actions)
 
-Building and deploying are separate workflows, so the image build never depends on the state of AWS.
-
-**`docker-build.yml` - build and publish (no cloud dependency).** Refreshes scores, builds the image from `app/`, and pushes it to `ghcr.io/<owner>/<repo>`:
+`.github/workflows/docker-build.yml` refreshes scores, builds the image from `app/`, and pushes it to `ghcr.io/<owner>/<repo>`. It has no cloud dependency:
 
 - on pushes to `main` touching `app/` or `scripts/` (tags `latest` and `sha-<commit>`)
 - every Sunday 12:00 UTC during the season (Aug-Jan) to pick up the weekend's game (adds a `YYYYMMDD` tag)
 - manually via **Run workflow**
 - on pull requests: builds without pushing and runs a container smoke test
 
-**`deploy-aws.yml` - deploy to AWS.** Runs after a successful `Docker Build` on `main` (or manually). It copies the exact `sha-<commit>` image from GHCR into ECR as `:latest` and `:sha-<commit>`, then rolls out the ECS service. It is skipped entirely when the `AWS_ROLE_ARN` repository variable is unset (e.g. after `make aws-destroy`), and a failure here doesn't affect the build.
-
-Authentication uses GitHub OIDC, so no AWS access keys are stored in GitHub. `make aws-deploy` sets `AWS_ROLE_ARN` and `AWS_REGION` automatically (or run `make gh-setup`). If `gh` isn't installed, set them under **Settings > Secrets and variables > Actions > Variables**, using `terraform -chdir=terraform/aws output -raw github_actions_role_arn`.
-
-If the AWS account already has a GitHub OIDC provider (`token.actions.githubusercontent.com`), deploy with `TF_VAR_create_github_oidc_provider=false` to reuse it.
+GitHub Actions does not deploy to AWS; `make aws-deploy` / `make aws-push` copy the published image into ECR.
 
 ## Notes
 
