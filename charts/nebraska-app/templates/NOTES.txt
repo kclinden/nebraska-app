@@ -1,0 +1,13 @@
+The Husker app is deployed as release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+Open it locally:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "nebraska-app.fullname" . }} 8081:{{ .Values.service.port }}
+  then browse http://localhost:8081
+{{- if .Values.ingress.enabled }}
+
+Ingress: http://{{ .Values.ingress.host }}
+{{- end }}
+{{- if .Values.dynamodb.enabled }}
+
+Data lives in in-cluster DynamoDB Local (in-memory). `helm upgrade` re-runs the seed job.
+{{- end }}

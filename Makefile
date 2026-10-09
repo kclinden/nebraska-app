@@ -34,6 +34,7 @@ step = @printf '\n\033[1;36m==> %s\033[0m\n' "$(1)"
 
 .DEFAULT_GOAL := help
 .PHONY: help setup-check scores local-up local-down local-restart local-logs local-reseed \
+        k8s-up k8s-image-local k8s-open k8s-status k8s-logs k8s-reseed k8s-down \
         aws-login aws-init aws-plan aws-deploy aws-ecr-login aws-image aws-image-local aws-push \
         aws-redeploy aws-url aws-logs aws-destroy \
         azure-login azure-init azure-plan azure-deploy azure-outputs azure-image azure-image-local \
@@ -66,6 +67,53 @@ local-logs: ## Tail logs from the local stack
 
 local-reseed: ## Re-run the DynamoDB Local seeder from data/*.yaml
 	docker compose run --rm seed
+
+# ---------- Local Kubernetes (Helm chart in charts/nebraska-app) ----------
+
+K8S_CONTEXT ?= $(shell kubectl config current-context 2>/dev/null)
+K8S_NS      ?= nebraska-app
+K8S_RELEASE ?= nebraska-app
+K8S_PORT    ?= 8081
+HELM_ARGS   ?=
+HELM := helm --kube-context $(K8S_CONTEXT) --namespace $(K8S_NS)
+KUBECTL := kubectl --context $(K8S_CONTEXT) --namespace $(K8S_NS)
+# Seed data comes from the repo so the chart and docker compose share one source of truth.
+HELM_SEED := --set-file seed.script=scripts/seed_local_dynamodb.py \
+             --set-file seed.roster=data/roster.yaml --set-file seed.schedule=data/schedule.yaml
+
+k8s-up: ## Install/upgrade the Helm chart (GHCR image + DynamoDB Local) on the current kube context
+	$(call step,Deploying $(K8S_RELEASE) to $(K8S_CONTEXT)/$(K8S_NS))
+	$(HELM) upgrade --install $(K8S_RELEASE) charts/nebraska-app --create-namespace \
+		--wait --timeout 5m $(HELM_SEED) $(HELM_ARGS)
+	@$(MAKE) --no-print-directory k8s-status
+	@echo "Run 'make k8s-open' to browse http://localhost:$(K8S_PORT)"
+
+k8s-image-local: scores ## Build ./app locally and deploy it to the cluster (Docker Desktop shares the image store)
+	$(call step,Building nebraska-app:local)
+	docker build -t nebraska-app:local ./app
+	@$(MAKE) --no-print-directory k8s-up \
+		HELM_ARGS="--set image.repository=nebraska-app --set image.tag=local --set image.pullPolicy=Never $(HELM_ARGS)"
+	$(KUBECTL) rollout restart deployment/$(K8S_RELEASE)
+	$(KUBECTL) rollout status deployment/$(K8S_RELEASE) --timeout 2m
+
+k8s-open: ## Port-forward the app to http://localhost:K8S_PORT (Ctrl-C to stop)
+	$(call step,Forwarding http://localhost:$(K8S_PORT) to svc/$(K8S_RELEASE))
+	$(KUBECTL) port-forward svc/$(K8S_RELEASE) $(K8S_PORT):80
+
+k8s-status: ## Show the release's pods, services, and recent seed job
+	$(call step,$(K8S_RELEASE) in $(K8S_CONTEXT)/$(K8S_NS))
+	@$(KUBECTL) get pods,svc,jobs -l app.kubernetes.io/instance=$(K8S_RELEASE) -o wide
+
+k8s-logs: ## Tail the app pod logs
+	$(KUBECTL) logs -f deployment/$(K8S_RELEASE)
+
+k8s-reseed: ## Re-run the seed job (helm upgrade with the same values)
+	@$(MAKE) --no-print-directory k8s-up HELM_ARGS="--reuse-values $(HELM_ARGS)"
+
+k8s-down: ## Uninstall the release and delete its namespace
+	$(call step,Removing $(K8S_RELEASE) from $(K8S_CONTEXT)/$(K8S_NS))
+	-$(HELM) uninstall $(K8S_RELEASE) --wait
+	kubectl --context $(K8S_CONTEXT) delete namespace $(K8S_NS) --ignore-not-found
 
 # ---------- AWS (Terraform + ECS Fargate, local state) ----------
 

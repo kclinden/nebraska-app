@@ -1,0 +1,55 @@
+{{- if .Values.dynamodb.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nebraska-app.fullname" . }}-dynamodb
+  labels:
+    {{- include "nebraska-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dynamodb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "nebraska-app.selector" . | nindent 6 }}
+      app.kubernetes.io/component: dynamodb
+  template:
+    metadata:
+      labels:
+        {{- include "nebraska-app.selector" . | nindent 8 }}
+        app.kubernetes.io/component: dynamodb
+    spec:
+      containers:
+        - name: dynamodb
+          image: {{ .Values.dynamodb.image }}
+          args: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+          ports:
+            - name: dynamodb
+              containerPort: 8000
+          readinessProbe:
+            tcpSocket:
+              port: dynamodb
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 768Mi
+          securityContext:
+            {{- include "nebraska-app.restrictedContainer" . | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nebraska-app.fullname" . }}-dynamodb
+  labels:
+    {{- include "nebraska-app.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "nebraska-app.selector" . | nindent 4 }}
+    app.kubernetes.io/component: dynamodb
+  ports:
+    - name: dynamodb
+      port: 8000
+      targetPort: dynamodb
+{{- end }}
