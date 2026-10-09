@@ -45,6 +45,10 @@ resource "azurerm_linux_web_app" "app" {
   }
 
   app_settings = {
+    SESSION_SECRET                      = random_password.auth["SESSION_SECRET"].result
+    ADMIN_PASSWORD                      = random_password.auth["ADMIN_PASSWORD"].result
+    VIEWER_PASSWORD                     = random_password.auth["VIEWER_PASSWORD"].result
+    SESSION_COOKIE_SECURE               = "true"
     WEBSITES_PORT                       = "5000"
     WEBSITES_ENABLE_APP_SERVICE_STORAGE = "false"
     STORAGE_BACKEND                     = "azure_table"
@@ -69,5 +73,5 @@ resource "azurerm_linux_web_app" "app" {
     }
   }
 
-  depends_on = [azurerm_role_assignment.acr_pull, azurerm_role_assignment.table_data]
+  depends_on = [azurerm_role_assignment.acr_pull, azurerm_role_assignment.table_data, azurerm_storage_table.users]
 }

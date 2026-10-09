@@ -13,6 +13,10 @@ from botocore.exceptions import ClientError, EndpointConnectionError
 DATA_DIR = Path(os.environ.get("DATA_DIR", Path(__file__).resolve().parent.parent / "data"))
 
 TABLES = {
+    "NebraskaUsers": {
+        "KeySchema": [{"AttributeName": "Id", "KeyType": "HASH"}],
+        "AttributeDefinitions": [{"AttributeName": "Id", "AttributeType": "S"}],
+    },
     "NebraskaPlayers": {
         "KeySchema": [
             {"AttributeName": "JerseyNumber", "KeyType": "HASH"},
