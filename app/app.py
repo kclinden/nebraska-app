@@ -4,6 +4,7 @@ from pathlib import Path
 from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory
 
 from storage import get_store
+from admin import register_admin
 
 app = Flask(__name__)
 
@@ -11,6 +12,7 @@ app = Flask(__name__)
 SCORES_FILE = Path(__file__).resolve().parent / "scores.json"
 SCORES = json.loads(SCORES_FILE.read_text()) if SCORES_FILE.exists() else {}
 store = get_store()
+register_admin(app, store, SCORES)
 SELL_OUT_STREAK = "403+"
 
 HTML_TEMPLATE = """
@@ -371,6 +373,7 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
+        <a href="/admin" style="display:block; padding:12px 30px; color:#a81228;">Admin</a>
         <div class="hero">
             <div>
                 <div class="logo-row">
@@ -493,42 +496,17 @@ HTML_TEMPLATE = """
                         <th>Jersey #</th>
                         <th>Name</th>
                         <th>Position</th>
-                        <th>Actions</th>
                     </tr>
                     {% for player in players %}
                     <tr>
                         <td>{{ player.JerseyNumber }}</td>
                         <td>{{ player.Name }}</td>
                         <td>{{ player.Position }}</td>
-                        <td>
-                            <form action="/delete" method="POST" style="display:inline;">
-                                <input type="hidden" name="jersey" value="{{ player.JerseyNumber }}">
-                                <input type="hidden" name="name" value="{{ player.Name }}">
-                                <button type="submit" class="delete-btn">Remove</button>
-                            </form>
-                        </td>
                     </tr>
                     {% endfor %}
                 </table>
 
-                <hr style="border: 0; border-top: 1px solid #eee3da; margin: 26px 0;">
-
-                <h3 class="panel-title" style="font-size: 18px;">Add Player</h3>
-                <form action="/add" method="POST">
-                    <div class="form-group">
-                        <label for="jersey">Jersey Number:</label>
-                        <input type="number" id="jersey" name="jersey" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="name">Player Name:</label>
-                        <input type="text" id="name" name="name" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="position">Position:</label>
-                        <input type="text" id="position" name="position" required>
-                    </div>
-                    <button type="submit">Add Player</button>
-                </form>
+                <p><a href="/admin">Manage roster</a></p>
             </div>
         </div>
     </div>
@@ -756,7 +734,7 @@ def add_player():
 
     if jersey and name and position:
         store.add_player(int(jersey), name, position)
-    return redirect(url_for("index", _anchor="roster"))
+    return redirect("/admin")
 
 
 @app.route("/delete", methods=["POST"])
@@ -765,7 +743,7 @@ def delete_player():
     name = request.form.get("name")
     if jersey and name:
         store.delete_player(int(jersey), name)
-    return redirect(url_for("index", _anchor="roster"))
+    return redirect("/admin")
 
 
 if __name__ == "__main__":

@@ -6,13 +6,50 @@ PLAYERS_TABLE = "NebraskaPlayers"
 SCHEDULE_TABLE = "NebraskaSchedule2026"
 
 
-class DynamoStore:
+class RecordStore:
+    def get_record(self, record_id):
+        raise NotImplementedError
+
+    def save_record(self, record):
+        raise NotImplementedError
+
+    def list_records(self):
+        raise NotImplementedError
+
+
+class DynamoStore(RecordStore):
     def __init__(self):
         import boto3
 
         dynamodb = boto3.resource("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
         self.players = dynamodb.Table(PLAYERS_TABLE)
         self.schedule = dynamodb.Table(SCHEDULE_TABLE)
+        self.records = dynamodb.Table("NebraskaUsers")
+
+    def get_record(self, record_id):
+        return self.records.get_item(Key={"Id": record_id}).get("Item")
+
+    def save_record(self, record):
+        self.records.put_item(Item=record)
+
+    def create_record(self, record):
+        from botocore.exceptions import ClientError
+
+        try:
+            self.records.put_item(Item=record, ConditionExpression="attribute_not_exists(Id)")
+            return True
+        except ClientError as error:
+            if error.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                raise
+            return False
+
+    def list_records(self):
+        response = self.records.scan()
+        records = response.get("Items", [])
+        while response.get("LastEvaluatedKey"):
+            response = self.records.scan(ExclusiveStartKey=response["LastEvaluatedKey"])
+            records.extend(response.get("Items", []))
+        return records
 
     def list_players(self):
         return self.players.scan().get("Items", [])
@@ -27,7 +64,7 @@ class DynamoStore:
         self.players.delete_item(Key={"JerseyNumber": jersey, "PlayerName": name})
 
 
-class AzureTableStore:
+class AzureTableStore(RecordStore):
     """Players: PartitionKey=jersey, RowKey=sha1(name). Games: PartitionKey=season, RowKey=game id."""
 
     def __init__(self):
@@ -39,6 +76,38 @@ class AzureTableStore:
         )
         self.players = service.get_table_client(PLAYERS_TABLE)
         self.schedule = service.get_table_client(SCHEDULE_TABLE)
+        self.records = service.get_table_client("NebraskaUsers")
+
+    def get_record(self, record_id):
+        import json
+        from azure.core.exceptions import ResourceNotFoundError
+
+        try:
+            return json.loads(self.records.get_entity("records", record_id)["Payload"])
+        except ResourceNotFoundError:
+            return None
+
+    def save_record(self, record):
+        import json
+
+        self.records.upsert_entity({
+            "PartitionKey": "records", "RowKey": record["Id"], "Payload": json.dumps(record),
+        })
+
+    def list_records(self):
+        import json
+
+        return [json.loads(record["Payload"]) for record in self.records.list_entities()]
+
+    def create_record(self, record):
+        import json
+        from azure.core.exceptions import ResourceExistsError
+
+        try:
+            self.records.create_entity({"PartitionKey": "records", "RowKey": record["Id"], "Payload": json.dumps(record)})
+            return True
+        except ResourceExistsError:
+            return False
 
     def list_players(self):
         return [dict(e) for e in self.players.list_entities()]
@@ -66,7 +135,7 @@ def _row_key(name):
     return hashlib.sha1(name.encode()).hexdigest()
 
 
-class FirestoreStore:
+class FirestoreStore(RecordStore):
     """Player doc id = '<jersey>-<sha1(name)>'; game doc id = game id."""
 
     def __init__(self):
@@ -77,6 +146,25 @@ class FirestoreStore:
         )
         self.players = client.collection(PLAYERS_TABLE)
         self.schedule = client.collection(SCHEDULE_TABLE)
+        self.records = client.collection("NebraskaUsers")
+
+    def get_record(self, record_id):
+        return self.records.document(record_id).get().to_dict()
+
+    def save_record(self, record):
+        self.records.document(record["Id"]).set(record)
+
+    def list_records(self):
+        return [record.to_dict() for record in self.records.stream()]
+
+    def create_record(self, record):
+        from google.api_core.exceptions import AlreadyExists
+
+        try:
+            self.records.document(record["Id"]).create(record)
+            return True
+        except AlreadyExists:
+            return False
 
     def list_players(self):
         return [d.to_dict() for d in self.players.stream()]

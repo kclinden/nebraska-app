@@ -31,10 +31,12 @@ make <cloud>-destroy
 
 ## Overview
 
+This is an intentionally vulnerable security-testing application, not a production service. Use synthetic data and disposable accounts in isolated projects/subscriptions. API authorization findings are always enabled; there is no demo-mode switch. Public deployments combined with the deliberately broad cloud storage roles can expose resources outside this application.
+
 ![Nebraska App - schedule with game stats expanded](docs/app-screenshot.png)
 
 - **Schedule (default tab)**: 2026 games with date, opponent, location, and home/away. Completed games show the final score and a **Stats** button that expands team stats (yards, first downs, 3rd-down efficiency, turnovers, penalties, possession) and Husker passing/rushing/receiving leaders.
-- **Roster**: players sorted by jersey number, with add and remove.
+- **Roster**: public read-only players sorted by jersey number. Login at `/admin` to manage the roster; administrators also manage accounts at `/admin/users`.
 - **Program Legacy**: national/conference titles, Heisman winners, all-time wins, and the sellout streak, next to a Memorial Stadium photo.
 - **Play Hail Varsity**: plays the fight song in the browser (Web Audio).
 
@@ -46,6 +48,58 @@ Scores and stats come from ESPN and are baked into the image at build time; the 
 make setup-check   # verify tools and logins; prints fix commands for anything missing
 make local-up      # http://localhost:8080
 ```
+
+Local Docker and Helm seed `admin` / `local-admin-password` and `viewer` / `local-viewer-password` on the first admin/API request. These are disposable local-only defaults. Bootstrap passwords are hashed in `NebraskaUsers`; re-seeding or redeploying does not reset existing accounts.
+
+## Admin and API
+
+`/admin/login` uses password-hashed database accounts and signed Flask sessions. HTML roster writes and account management enforce the admin role and CSRF tokens. Admins can create users, change roles, disable accounts, and reset passwords (minimum 12 characters for managed accounts). A reset or management change invalidates existing sessions for that account. Disabled users cannot log in.
+
+Accounts and synthetic reports persist in DynamoDB's `NebraskaUsers`, Azure's `NebraskaUsers` table, or Firestore's `NebraskaUsers` collection. Local DynamoDB is still in-memory: a database pod/container restart loses these accounts. Cloud data survives app restarts but is deleted with the database on teardown.
+
+### Credentials
+
+Required environment variables are `SESSION_SECRET`, `ADMIN_PASSWORD`, and `VIEWER_PASSWORD`. Without them, admin/API routes return 503; the public page and static-image health probes still work. None is baked into the image. Keep the signing key stable across workers and restarts.
+
+- Compose: override the defaults through environment variables or an ignored `.env` file.
+- Helm: set `auth.existingSecret` to a Kubernetes Secret containing the three keys, or override `auth.sessionSecret`, `auth.adminPassword`, and `auth.viewerPassword`. Helm release values and Kubernetes Secrets need appropriate access controls.
+- Terraform: each cloud generates three stable random secrets. AWS uses Secrets Manager and ECS secret injection; Azure uses protected App Service application settings; GCP uses Secret Manager references. Passwords and signing keys also exist in local Terraform state, so protect that file. `VERBOSE=1` provider logging can include sensitive data; do not share those logs.
+- To retrieve generated cloud bootstrap passwords explicitly, run `terraform -chdir=terraform/<cloud> output -json bootstrap_passwords`. Do not paste the output into tickets or scanner reports. Use the admin UI for subsequent password resets; changing a bootstrap secret does not reset an existing account.
+- Azure/GCP use Secure session cookies over HTTPS. Local HTTP and the current HTTP-only AWS ALB use non-Secure cookies; add TLS and set `SESSION_COOKIE_SECURE=true` before transmitting non-disposable credentials.
+
+Existing deployments need `make <cloud>-deploy` to provision account storage/secrets, not only `*-push`. Let the new image build finish before that deployment.
+
+### API Discovery
+
+The OpenAPI 3.0 specification is served at `/openapi.json`. Public endpoints list games and players; writes and user/report endpoints require a session. JSON scanner login flow:
+
+1. `GET /api/v1/session`, retaining the session cookie and the returned `csrf_token`.
+2. `POST /api/v1/session` with JSON `{"username":"viewer","password":"..."}` and an `X-CSRF-Token` header containing that token.
+3. Retain the authenticated session cookie for subsequent requests. The response includes a new token for `DELETE /api/v1/session` (logout).
+
+| Endpoint | Methods | Purpose |
+| --- | --- | --- |
+| `/api/v1/games` | GET | Schedule |
+| `/api/v1/games/{id}/stats` | GET | Baked-in game stats |
+| `/api/v1/players` | GET, POST | Name search (`q`) and player creation |
+| `/api/v1/players/{id}` | PATCH, DELETE | Update position or remove a player (use Id returned by GET) |
+| `/api/v1/users/me` | GET, PATCH | Account profile and synthetic metadata |
+| `/api/v1/reports` | GET | Current user's reports |
+| `/api/v1/reports/{id}` | GET | Private report lookup |
+
+### Expected Findings
+
+| Scenario | Reproduction with a viewer session | Expected result |
+| --- | --- | --- |
+| Broken function-level authorization (API5) | POST/PATCH/DELETE a player | Succeeds without admin role; HTML admin writes are restricted |
+| Broken object-level authorization (API1) | GET `/api/v1/reports/report-admin` | Returns another user's synthetic private report |
+| Mass assignment (API3) | PATCH `/api/v1/users/me` with `{"Role":"admin"}` | Viewer becomes admin and can access `/admin/users` |
+| Excessive data exposure (API3) | GET `/api/v1/users/me` | Includes `InternalNote` and `Department`; never password hashes or signing keys |
+| Missing rate limits / unbounded lists (API4) | Inspect session/login and list routes | No application throttling or pagination limits |
+
+Mutating API routes deliberately lack CSRF protection (unlike the HTML forms and session-login endpoint). Use these cases only against this owned lab. Reset promoted users using a separate administrator session or reset disposable local data.
+
+Focused checks: `docker build -t nebraska-app:test ./app` then `docker run --rm -v "$PWD/tests:/tests:ro" --entrypoint python nebraska-app:test -m unittest discover -s /tests -v`. CI runs the same tests before building published images.
 
 `make setup-check` (or `scripts/check_setup.sh [local] [aws] [azure] [gcp]`) checks git, make, curl, Python, Docker (daemon, `linux/amd64` builds, Compose), ESPN reachability, Terraform >= 1.6, AWS CLI v2 with the SSO profile and session, Azure CLI and login, gcloud with login, Application Default Credentials, and project, and the GitHub CLI. It exits non-zero if a required tool is missing.
 

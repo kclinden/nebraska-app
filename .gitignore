@@ -19,6 +19,8 @@ override.tf.json
 .terraformrc
 terraform.rc
 *.tfplan
+.env
+**/__pycache__/
 
 # Generated at build time by scripts/update_scores.py
 app/scores.json

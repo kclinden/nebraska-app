@@ -59,6 +59,22 @@ resource "google_cloud_run_v2_service" "app" {
         name  = "GOOGLE_CLOUD_PROJECT"
         value = var.project_id
       }
+      env {
+        name  = "SESSION_COOKIE_SECURE"
+        value = "true"
+      }
+      dynamic "env" {
+        for_each = google_secret_manager_secret.auth
+        content {
+          name = env.key
+          value_source {
+            secret_key_ref {
+              secret  = env.value.secret_id
+              version = google_secret_manager_secret_version.auth[env.key].version
+            }
+          }
+        }
+      }
     }
   }
 
@@ -67,5 +83,5 @@ resource "google_cloud_run_v2_service" "app" {
     ignore_changes = [client, client_version]
   }
 
-  depends_on = [google_project_iam_member.firestore_user]
+  depends_on = [google_project_iam_member.firestore_user, google_secret_manager_secret_iam_member.auth]
 }

@@ -134,6 +134,10 @@ resource "aws_ecs_task_definition" "app" {
     essential    = true
     portMappings = [{ containerPort = 5000, protocol = "tcp" }]
     environment  = [{ name = "AWS_REGION", value = data.aws_region.current.region }]
+    secrets = [for key in ["SESSION_SECRET", "ADMIN_PASSWORD", "VIEWER_PASSWORD"] : {
+      name      = key
+      valueFrom = "${aws_secretsmanager_secret.auth.arn}:${key}::"
+    }]
     logConfiguration = {
       logDriver = "awslogs"
       options = {
@@ -170,5 +174,5 @@ resource "aws_ecs_service" "app" {
     rollback = true
   }
 
-  depends_on = [aws_lb_listener.http]
+  depends_on = [aws_lb_listener.http, aws_secretsmanager_secret_version.auth, aws_iam_role_policy.read_auth, aws_dynamodb_table.users]
 }

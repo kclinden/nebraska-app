@@ -1,4 +1,5 @@
 flask
+Flask-Login
 boto3
 azure-data-tables
 azure-identity

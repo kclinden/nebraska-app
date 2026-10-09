@@ -57,6 +57,7 @@ resource "aws_iam_policy" "dynamodb_rw_policy" {
         Resource = [
           aws_dynamodb_table.nebraska_players.arn,
           aws_dynamodb_table.nebraska_schedule_2026.arn,
+          aws_dynamodb_table.users.arn,
         ]
       }
     ]

@@ -32,6 +32,11 @@ spec:
           envFrom:
             - secretRef:
                 name: {{ include "nebraska-app.fullname" . }}-aws
+            - secretRef:
+                name: {{ .Values.auth.existingSecret | default (printf "%s-auth" (include "nebraska-app.fullname" .)) }}
+          env:
+            - name: SESSION_COOKIE_SECURE
+              value: {{ .Values.auth.secureCookies | quote }}
           readinessProbe:
             httpGet:
               path: /nebraska_football.png

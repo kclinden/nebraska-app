@@ -32,5 +32,9 @@ services:
         condition: service_completed_successfully
     environment:
       <<: *local-aws
+      SESSION_SECRET: ${SESSION_SECRET:-local-only-disposable-session-key}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-local-admin-password}
+      VIEWER_PASSWORD: ${VIEWER_PASSWORD:-local-viewer-password}
+      SESSION_COOKIE_SECURE: "false"
     ports:
       - "8080:5000"

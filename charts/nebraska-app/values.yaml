@@ -6,6 +6,13 @@ image:
 
 replicaCount: 1
 
+auth:
+  existingSecret: ""
+  sessionSecret: local-only-disposable-session-key
+  adminPassword: local-admin-password
+  viewerPassword: local-viewer-password
+  secureCookies: false
+
 service:
   type: ClusterIP
   port: 80
