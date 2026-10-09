@@ -15,7 +15,11 @@ resource "google_secret_manager_secret" "auth" {
   secret_id = "husker-${lower(replace(each.key, "_", "-"))}"
 
   replication {
-    auto {}
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
   }
 
   depends_on = [google_project_service.secrets]
