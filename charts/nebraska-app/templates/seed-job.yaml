@@ -1,0 +1,63 @@
+{{- if .Values.seed.enabled }}
+{{- $name := printf "%s-seed" (include "nebraska-app.fullname" .) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "nebraska-app.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "-1"
+    helm.sh/hook-delete-policy: before-hook-creation
+data:
+  seed_local_dynamodb.py: |
+    {{- required "seed.script is required (make k8s-up passes --set-file seed.script=scripts/seed_local_dynamodb.py)" .Values.seed.script | nindent 4 }}
+  roster.yaml: |
+    {{- required "seed.roster is required (--set-file seed.roster=data/roster.yaml)" .Values.seed.roster | nindent 4 }}
+  schedule.yaml: |
+    {{- required "seed.schedule is required (--set-file seed.schedule=data/schedule.yaml)" .Values.seed.schedule | nindent 4 }}
+---
+# Re-runs on every install/upgrade; the seeder creates tables if missing and upserts items.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "nebraska-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: seed
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        {{- include "nebraska-app.selector" . | nindent 8 }}
+        app.kubernetes.io/component: seed
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: seed
+          image: {{ .Values.seed.image }}
+          command: ["sh", "-c"]
+          args:
+            - pip install -q --root-user-action=ignore boto3 pyyaml && python /seed/seed_local_dynamodb.py
+          env:
+            - name: DATA_DIR
+              value: /seed
+          envFrom:
+            - secretRef:
+                name: {{ include "nebraska-app.fullname" . }}-aws
+          volumeMounts:
+            - name: seed
+              mountPath: /seed
+          securityContext:
+            {{- include "nebraska-app.restrictedContainer" . | nindent 12 }}
+      volumes:
+        - name: seed
+          configMap:
+            name: {{ $name }}
+{{- end }}
