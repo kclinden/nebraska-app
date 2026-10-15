@@ -1,5 +1,12 @@
 The Husker app is deployed as release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
 
+{{- if and (not .Values.dynamodb.enabled) (eq .Values.service.type "NodePort") }}
+
+For Terraform-managed EKS deployments, retrieve the public ALB URL:
+  make eks-url
+
+{{- end }}
+
 Open it locally:
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "nebraska-app.fullname" . }} 8081:{{ .Values.service.port }}
   then browse http://localhost:8081

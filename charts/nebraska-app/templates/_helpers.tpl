@@ -19,8 +19,12 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if .Values.dynamodb.enabled -}}
 http://{{ include "nebraska-app.fullname" . }}-dynamodb:8000
 {{- else -}}
-{{ required "dynamodb.externalEndpoint is required when dynamodb.enabled=false" .Values.dynamodb.externalEndpoint }}
+{{ .Values.dynamodb.externalEndpoint }}
 {{- end -}}
+{{- end -}}
+
+{{- define "nebraska-app.serviceAccount" -}}
+{{- .Values.serviceAccount.name | default (include "nebraska-app.fullname" .) -}}
 {{- end -}}
 
 {{- define "nebraska-app.restrictedContainer" -}}

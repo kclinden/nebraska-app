@@ -5,12 +5,13 @@ from pathlib import Path
 import re
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from flask import Flask
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 from admin import register_admin, user_id
+from storage import DynamoStore
 
 
 class MemoryStore:
@@ -146,6 +147,26 @@ class AdminTests(unittest.TestCase):
                 record["Version"] = Decimal("1")
         self.assertEqual(self.login(self.client).status_code, 302)
         self.assertEqual(self.client.get("/api/v1/users/me").status_code, 200)
+
+
+class DynamoStoreTests(unittest.TestCase):
+    def test_default_table_names(self):
+        with patch.dict(os.environ, {}, clear=True), patch("boto3.resource") as resource:
+            DynamoStore()
+            self.assertEqual(resource.return_value.Table.call_args_list, [
+                call("NebraskaPlayers"), call("NebraskaSchedule2026"), call("NebraskaUsers"),
+            ])
+
+    def test_eks_table_names(self):
+        with patch.dict(os.environ, {
+            "DYNAMODB_PLAYERS_TABLE": "nebraska-eks-players",
+            "DYNAMODB_SCHEDULE_TABLE": "nebraska-eks-schedule",
+            "DYNAMODB_USERS_TABLE": "nebraska-eks-users",
+        }), patch("boto3.resource") as resource:
+            DynamoStore()
+            self.assertEqual(resource.return_value.Table.call_args_list, [
+                call("nebraska-eks-players"), call("nebraska-eks-schedule"), call("nebraska-eks-users"),
+            ])
 
 
 if __name__ == "__main__":
