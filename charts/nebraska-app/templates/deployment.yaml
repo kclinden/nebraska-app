@@ -17,6 +17,9 @@ spec:
         {{- include "nebraska-app.selector" . | nindent 8 }}
         app.kubernetes.io/component: web
     spec:
+      {{- if or .Values.serviceAccount.create .Values.serviceAccount.name }}
+      serviceAccountName: {{ include "nebraska-app.serviceAccount" . }}
+      {{- end }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001

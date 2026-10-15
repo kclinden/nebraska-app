@@ -5,12 +5,14 @@ on:
   push:
     branches: [main]
     paths:
+      - "Makefile"
       - "app/**"
       - "scripts/**"
       - "tests/**"
       - ".github/workflows/docker-build.yml"
   pull_request:
     paths:
+      - "Makefile"
       - "app/**"
       - "scripts/**"
       - "tests/**"

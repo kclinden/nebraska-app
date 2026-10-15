@@ -5,11 +5,15 @@ on:
     paths:
       - "terraform/**"
       - "data/**"
+      - "charts/**"
+      - "tests/test_helm.py"
       - ".github/workflows/terraform-ci.yml"
   pull_request:
     paths:
       - "terraform/**"
       - "data/**"
+      - "charts/**"
+      - "tests/test_helm.py"
       - ".github/workflows/terraform-ci.yml"
 
 jobs:
@@ -19,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        cloud: [aws, azure, gcp]
+        cloud: [aws, aws-eks, azure, gcp]
     defaults:
       run:
         working-directory: terraform/${{ matrix.cloud }}
@@ -39,3 +43,19 @@ jobs:
 
       - name: Terraform Validate
         run: terraform validate
+
+      - name: Mocked EKS Tests
+        if: matrix.cloud == 'aws-eks'
+        run: terraform test
+
+  helm:
+    name: Helm compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4.3.1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pyyaml
+      - run: python -m unittest discover -s tests -p test_helm.py -v

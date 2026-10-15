@@ -22,9 +22,9 @@ class DynamoStore(RecordStore):
         import boto3
 
         dynamodb = boto3.resource("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
-        self.players = dynamodb.Table(PLAYERS_TABLE)
-        self.schedule = dynamodb.Table(SCHEDULE_TABLE)
-        self.records = dynamodb.Table("NebraskaUsers")
+        self.players = dynamodb.Table(os.environ.get("DYNAMODB_PLAYERS_TABLE", PLAYERS_TABLE))
+        self.schedule = dynamodb.Table(os.environ.get("DYNAMODB_SCHEDULE_TABLE", SCHEDULE_TABLE))
+        self.records = dynamodb.Table(os.environ.get("DYNAMODB_USERS_TABLE", "NebraskaUsers"))
 
     def get_record(self, record_id):
         return self.records.get_item(Key={"Id": record_id}).get("Item")

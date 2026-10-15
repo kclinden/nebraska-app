@@ -6,6 +6,10 @@ image:
 
 replicaCount: 1
 
+serviceAccount:
+  create: false
+  name: ""
+
 auth:
   existingSecret: ""
   sessionSecret: local-only-disposable-session-key
@@ -16,6 +20,7 @@ auth:
 service:
   type: ClusterIP
   port: 80
+  nodePort: 32080
 
 ingress:
   enabled: false
@@ -34,11 +39,16 @@ dynamodb:
   enabled: true
   image: amazon/dynamodb-local:latest
   region: us-east-1
+  useStaticCredentials: true
   # Dummy credentials; DynamoDB Local doesn't validate them.
   accessKeyId: local
   secretAccessKey: local
-  # Point at an existing endpoint instead when enabled=false.
+  # When disabled, leave empty for managed DynamoDB; useStaticCredentials=false enables workload identity.
   externalEndpoint: ""
+  tables:
+    players: NebraskaPlayers
+    schedule: NebraskaSchedule2026
+    users: NebraskaUsers
 
 # Post-install/upgrade Job that creates the tables and loads roster/schedule.
 # The Makefile supplies these with --set-file from data/ and scripts/ so there is one source of truth.

@@ -35,6 +35,7 @@ step = @printf '\n\033[1;36m==> %s\033[0m\n' "$(1)"
 .DEFAULT_GOAL := help
 .PHONY: help setup-check scores local-up local-down local-restart local-logs local-reseed \
         k8s-up k8s-image-local k8s-open k8s-status k8s-logs k8s-reseed k8s-down \
+		eks-init eks-plan eks-deploy eks-kubeconfig eks-app eks-push eks-open eks-status eks-logs eks-destroy \
         aws-login aws-init aws-plan aws-deploy aws-ecr-login aws-image aws-image-local aws-push \
         aws-redeploy aws-url aws-logs aws-destroy \
         azure-login azure-init azure-plan azure-deploy azure-outputs azure-image azure-image-local \
@@ -114,6 +115,84 @@ k8s-down: ## Uninstall the release and delete its namespace
 	$(call step,Removing $(K8S_RELEASE) from $(K8S_CONTEXT)/$(K8S_NS))
 	-$(HELM) uninstall $(K8S_RELEASE) --wait
 	kubectl --context $(K8S_CONTEXT) delete namespace $(K8S_NS) --ignore-not-found
+
+# ---------- AWS EKS (separate Terraform state + Helm) ----------
+
+EKS_TF := terraform -chdir=terraform/aws-eks
+EKS_CONTEXT ?= nebraska-eks
+EKS_PORT ?= 8082
+EKS_NS = $(shell $(EKS_TF) output -raw namespace)
+EKS_KUBECTL = kubectl --context $(EKS_CONTEXT) --namespace $(EKS_NS)
+
+.PHONY: eks-url eks-preflight eks-image eks-image-local eks-ecr-login
+
+eks-preflight:
+	@for tool in terraform aws docker helm kubectl python3; do \
+		command -v "$$tool" >/dev/null || { echo "Missing required tool: $$tool" >&2; exit 1; }; \
+	done
+	@docker info >/dev/null || { echo "Start Docker before deploying EKS." >&2; exit 1; }
+
+eks-init: aws-login ## Initialize the separate EKS Terraform stack
+	$(EKS_TF) init -upgrade=false
+
+eks-plan: eks-init ## Validate and plan EKS, managed nodes, DynamoDB, and Pod Identity
+	$(EKS_TF) fmt -check
+	$(EKS_TF) validate
+	$(EKS_TF) plan
+
+eks-deploy: export AWS_PAGER :=
+eks-deploy: eks-preflight eks-init ## Provision EKS, build/push the app to ECR, and deploy it with Helm
+	$(EKS_TF) apply
+	@$(MAKE) --no-print-directory eks-image
+	@$(MAKE) --no-print-directory eks-push
+
+eks-image: ## Publish the local app to EKS ECR unless a custom image repository is configured
+	@set -e; build_local="$$($(EKS_TF) output -raw build_local_image)"; \
+	if test "$$build_local" = "true"; then $(MAKE) --no-print-directory eks-image-local; \
+	else echo "Using the configured pre-published image repository; skipping local build/push."; fi
+
+eks-ecr-login: export AWS_PAGER :=
+eks-ecr-login: aws-login
+	@set -e -o pipefail; repository="$$($(EKS_TF) output -raw ecr_repository_url)"; \
+	aws ecr get-login-password --region $(AWS_REGION) | \
+		docker login --username AWS --password-stdin "$${repository%%/*}"
+
+eks-image-local: eks-ecr-login scores ## Build the working copy for x86-64 EKS nodes and push its configured tag to ECR
+	@set -e; repository="$$($(EKS_TF) output -raw ecr_repository_url)"; \
+	tag="$$($(EKS_TF) output -raw image_tag)"; \
+	docker build --platform linux/amd64 -t "$${repository}:$${tag}" ./app; \
+	docker push "$${repository}:$${tag}"
+
+eks-kubeconfig: aws-login ## Add and select the named EKS kubeconfig context
+	aws eks update-kubeconfig --region $(AWS_REGION) --name "$$($(EKS_TF) output -raw cluster_name)" --alias $(EKS_CONTEXT)
+
+eks-app: eks-kubeconfig ## Install/upgrade the published image using generated EKS Helm values
+	@set -o pipefail; $(EKS_TF) output -raw helm_values | \
+		helm --kube-context $(EKS_CONTEXT) --namespace $(EKS_NS) upgrade --install nebraska-app charts/nebraska-app \
+		--create-namespace --wait --timeout 10m --values -
+	@$(MAKE) --no-print-directory eks-url
+
+eks-url: ## Print the EKS public ALB application URL
+	@url="$$($(EKS_TF) output -raw app_url 2>/dev/null)"; \
+	if test -n "$$url"; then printf '%s\n' "$$url"; \
+	else echo "No public ALB URL in state; run 'make eks-open' for private access."; fi
+
+eks-push: eks-app ## Upgrade the EKS app and restart pods to re-pull the published image
+	$(EKS_KUBECTL) rollout restart deployment/nebraska-app
+	$(EKS_KUBECTL) rollout status deployment/nebraska-app --timeout=5m
+
+eks-open: ## Port-forward the private EKS app to localhost (Ctrl-C to stop)
+	$(EKS_KUBECTL) port-forward svc/nebraska-app $(EKS_PORT):80
+
+eks-status: ## Show EKS application pods and services
+	$(EKS_KUBECTL) get pods,svc -l app.kubernetes.io/instance=nebraska-app
+
+eks-logs: ## Tail the EKS app logs
+	$(EKS_KUBECTL) logs -f deployment/nebraska-app
+
+eks-destroy: eks-kubeconfig ## Uninstall the EKS app, then destroy only the EKS stack and its data
+	helm --kube-context $(EKS_CONTEXT) --namespace $(EKS_NS) uninstall nebraska-app --ignore-not-found --wait
+	$(EKS_TF) destroy
 
 # ---------- AWS (Terraform + ECS Fargate, local state) ----------
 

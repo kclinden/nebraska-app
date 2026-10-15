@@ -13,6 +13,7 @@ make local-down
 
 # Cloud - pick one; each prints the app URL when done
 make aws-deploy                  # ECS Fargate + DynamoDB      (AWS SSO profile, default: master)
+make eks-deploy                  # EKS + ALB + DynamoDB        (builds/pushes the working copy to ECR)
 make azure-deploy                # App Service + Table Storage (active az subscription)
 make gcp-deploy                  # Cloud Run + Firestore       (active gcloud project)
 
@@ -23,10 +24,10 @@ make <cloud>-push                # copy the latest GHCR image and roll it out
 make <cloud>-destroy
 ```
 
-- Every cloud deploys the same image, `ghcr.io/kclinden/nebraska-app:latest`, built by GitHub Actions. Merge to `main` and let the **Docker Build** workflow finish before deploying app changes.
-- Deploys need Terraform >= 1.6 and the cloud's CLI; AWS and GCP also need Docker to copy the image.
+- All deployments use the same app source. ECS, Azure, and GCP copy the GHCR image built by GitHub Actions; EKS builds the working copy and pushes it to its own ECR repository. Merge to `main` and let the **Docker Build** workflow finish before using published app changes.
+- Deploys need Terraform >= 1.6 (>= 1.7 for EKS) and the cloud's CLI; AWS and GCP also need Docker. EKS additionally needs Helm and kubectl.
 - Terraform state is local per cloud (`terraform/<cloud>/terraform.tfstate`). Run `make <cloud>-destroy` from the same machine when you're done.
-- Running cost while deployed: AWS (ALB + Fargate) and Azure (B1 plan) bill continuously; GCP Cloud Run scales to zero.
+- Running cost while deployed: ECS (ALB + Fargate), EKS (control plane + EC2 nodes + ALB), and Azure (B1 plan) bill continuously; GCP Cloud Run scales to zero.
 - Add `VERBOSE=1` to any target for Terraform `INFO` logs and verbose `az`/`gcloud` output.
 
 ## Overview
@@ -55,7 +56,7 @@ Local Docker and Helm seed `admin` / `local-admin-password` and `viewer` / `loca
 
 `/admin/login` uses password-hashed database accounts and signed Flask sessions. HTML roster writes and account management enforce the admin role and CSRF tokens. Admins can create users, change roles, disable accounts, and reset passwords (minimum 12 characters for managed accounts). A reset or management change invalidates existing sessions for that account. Disabled users cannot log in.
 
-Accounts and synthetic reports persist in DynamoDB's `NebraskaUsers`, Azure's `NebraskaUsers` table, or Firestore's `NebraskaUsers` collection. Local DynamoDB is still in-memory: a database pod/container restart loses these accounts. Cloud data survives app restarts but is deleted with the database on teardown.
+Accounts and synthetic reports persist in DynamoDB's `NebraskaUsers` (EKS: `<cluster_name>-users`), Azure's `NebraskaUsers` table, or Firestore's `NebraskaUsers` collection. Local DynamoDB is still in-memory: a database pod/container restart loses these accounts. Cloud data survives app restarts but is deleted with the database on teardown.
 
 ### Credentials
 
@@ -63,7 +64,7 @@ Required environment variables are `SESSION_SECRET`, `ADMIN_PASSWORD`, and `VIEW
 
 - Compose: override the defaults through environment variables or an ignored `.env` file.
 - Helm: set `auth.existingSecret` to a Kubernetes Secret containing the three keys, or override `auth.sessionSecret`, `auth.adminPassword`, and `auth.viewerPassword`. Helm release values and Kubernetes Secrets need appropriate access controls.
-- Terraform: each cloud generates three stable random secrets. AWS uses Secrets Manager and ECS secret injection; Azure uses protected App Service application settings; GCP uses Secret Manager references. Passwords and signing keys also exist in local Terraform state, so protect that file. `VERBOSE=1` provider logging can include sensitive data; do not share those logs.
+- Terraform: each cloud generates three stable random secrets. ECS uses Secrets Manager and secret injection; EKS passes them to Kubernetes Secrets through Helm; Azure uses protected App Service application settings; GCP uses Secret Manager references. Passwords and signing keys also exist in local Terraform state (and EKS Helm release history), so protect these stores. `VERBOSE=1` provider logging can include sensitive data; do not share those logs.
 - To retrieve generated cloud bootstrap passwords explicitly, run `terraform -chdir=terraform/<cloud> output -json bootstrap_passwords`. Do not paste the output into tickets or scanner reports. Use the admin UI for subsequent password resets; changing a bootstrap secret does not reset an existing account.
 - Azure/GCP use Secure session cookies over HTTPS. Local HTTP and the current HTTP-only AWS ALB use non-Secure cookies; add TLS and set `SESSION_COOKIE_SECURE=true` before transmitting non-disposable credentials.
 
@@ -118,6 +119,7 @@ flowchart LR
 
     subgraph Dev[Developer machine]
         Make[make targets]
+        Source[Working-copy app source]
         subgraph Compose[docker compose]
             LocalApp[app container] --> DDBL[(DynamoDB Local)]
             Seed[seed job] --> DDBL
@@ -129,6 +131,10 @@ flowchart LR
         ALB[Application Load Balancer] --> ECS[ECS Fargate<br/>husker-app]
         ECR[(ECR)] --> ECS
         ECS --> DDB[(DynamoDB)]
+        EKSALB[Public EKS ALB] --> EKSService[NodePort service<br/>32080]
+        EKSService --> EKSPods[Flask pods on EKS<br/>managed EC2 nodes]
+        EKSECR[(Dedicated EKS ECR)] --> EKSPods
+        EKSPods -- Pod Identity --> EKSDDB[(Dedicated EKS<br/>DynamoDB tables)]
     end
 
     subgraph Azure
@@ -145,10 +151,14 @@ flowchart LR
     GHCR -- make azure-push<br/>az acr import --> ACR
     GHCR -- make gcp-push --> GAR
     Data -- terraform --> DDB
+    Data -- terraform --> EKSDDB
     Data -- terraform --> Tables
     Data -- terraform --> FS
     Make --> Compose
+    Make -- Terraform + Helm --> EKSPods
+    Source -. make eks-image-local .-> EKSECR
     Users((Fans)) --> ALB
+    Users --> EKSALB
     Users --> ACA
     Users --> RUN
 ```
@@ -174,18 +184,19 @@ sequenceDiagram
 
 ### Components
 
-| Component | Local | AWS | Azure | GCP |
-| --- | --- | --- | --- | --- |
-| Container runtime | Docker Compose | ECS Fargate (0.25 vCPU / 512 MB) | App Service, Linux B1 plan (1 vCPU / 1.75 GB) | Cloud Run (1 vCPU / 512 MiB, scales 0-1) |
-| Ingress | `localhost:8080` | ALB, HTTP :80 | Managed HTTPS ingress | Managed HTTPS (`*.run.app`) |
-| Image source | Local build | ECR (copied from GHCR) | ACR (imported from GHCR) | Artifact Registry (copied from GHCR) |
-| Data | DynamoDB Local (in-memory) | DynamoDB | Table Storage | Firestore (Native mode) |
-| App identity | Dummy keys | ECS task role | User-assigned managed identity | Service account `husker-app-run` |
-| Network | Compose network | VPC, 2 public subnets, IGW | App Service multi-tenant front end | Cloud Run managed |
-| Logs | `docker compose logs` | CloudWatch `/ecs/husker-app` | App Service log stream (`make azure-logs`) | Cloud Logging (`make gcp-logs`) |
-| Infra code | `docker-compose.yml` | `terraform/aws` | `terraform/azure` | `terraform/gcp` |
+| Component | Local | AWS ECS | AWS EKS | Azure | GCP |
+| --- | --- | --- | --- | --- | --- |
+| Container runtime | Docker Compose | ECS Fargate (0.25 vCPU / 512 MB) | EKS, 2 managed `t3.medium` nodes | App Service, Linux B1 plan (1 vCPU / 1.75 GB) | Cloud Run (1 vCPU / 512 MiB, scales 0-1) |
+| Ingress | `localhost:8080` | ALB, HTTP :80 | Public ALB to NodePort 32080; optional ACM HTTPS | Managed HTTPS ingress | Managed HTTPS (`*.run.app`) |
+| Image source | Local build | ECR (copied from GHCR) | Working copy built/pushed to dedicated ECR; repository override supported | ACR (imported from GHCR) | Artifact Registry (copied from GHCR) |
+| Data | DynamoDB Local (in-memory) | DynamoDB | Dedicated DynamoDB tables, encryption and PITR | Table Storage | Firestore (Native mode) |
+| App identity | Dummy keys | ECS task role | Service account with EKS Pod Identity | User-assigned managed identity | Service account `husker-app-run` |
+| Network | Compose network | VPC, 2 public subnets, IGW | Separate VPC, 2 public subnets, IGW; no NAT or SSH | App Service multi-tenant front end | Cloud Run managed |
+| Logs | `docker compose logs` | CloudWatch `/ecs/husker-app` | `make eks-logs`; control-plane logs in CloudWatch | App Service log stream (`make azure-logs`) | Cloud Logging (`make gcp-logs`) |
+| Infra code | `docker-compose.yml` | `terraform/aws` | `terraform/aws-eks` + Helm chart | `terraform/azure` | `terraform/gcp` |
 
 GitHub Actions only builds and publishes to GHCR; it has no cloud credentials. Deployments are pulled into each cloud by `make aws-deploy` / `make azure-deploy` / `make gcp-deploy` (and `*-push` for updates), so the build never depends on the state of any cloud.
+EKS uses Terraform for AWS resources and Helm for the app; `make eks-deploy` provisions infrastructure, builds/pushes the working copy to ECR, and deploys it in one command.
 
 ## Repository Layout
 
@@ -194,6 +205,8 @@ GitHub Actions only builds and publishes to GHCR; it has no cloud credentials. D
 - `scripts/` developer setup check, score fetcher, and DynamoDB Local seeder
 - `docs/` README assets (app screenshot)
 - `terraform/aws/` AWS stack (VPC, ECS Fargate, ALB, ECR, DynamoDB, IAM)
+- `terraform/aws-eks/` independent EKS stack (VPC, managed nodes, ALB, ECR, DynamoDB, Pod Identity)
+- `charts/nebraska-app/` shared Helm chart for local Kubernetes and EKS
 - `terraform/azure/` Azure stack (App Service, ACR, Table Storage, managed identity)
 - `terraform/gcp/` GCP stack (Cloud Run, Artifact Registry, Firestore, service account)
 - `docker-compose.yml` local test stack
@@ -218,7 +231,20 @@ GitHub Actions only builds and publishes to GHCR; it has no cloud credentials. D
 | `make aws-redeploy` | Force a new ECS deployment on the current `:latest` image and show rollout progress until stable |
 | `make aws-url` | Print the app URL |
 | `make aws-logs` | Tail the app's CloudWatch logs |
-| `make aws-destroy` | Destroy all AWS resources |
+| `make aws-destroy` | Destroy the ECS stack and its data, not EKS |
+| `make eks-init` | Initialize the separate EKS Terraform stack |
+| `make eks-plan` | Validate and plan the EKS infrastructure |
+| `make eks-deploy` | Provision EKS, build/push the working copy to ECR, and deploy/restart the app with Helm |
+| `make eks-image` | Build/push to EKS ECR unless a custom pre-published image repository is configured |
+| `make eks-image-local` | Refresh scores, build the working copy for `linux/amd64`, and push the configured tag to EKS ECR |
+| `make eks-kubeconfig` | Add and select the named EKS kubeconfig context |
+| `make eks-app` | Install/upgrade the app using generated Terraform Helm values, without reapplying AWS infrastructure |
+| `make eks-push` | Upgrade the app and restart pods to re-pull the configured image; does not publish an image |
+| `make eks-url` | Print the public ALB URL |
+| `make eks-open` | Port-forward the app to `localhost:8082` |
+| `make eks-status` | Show app pods and services |
+| `make eks-logs` | Tail app container logs |
+| `make eks-destroy` | Uninstall the app and destroy the EKS stack, including its data and ECR images |
 | `make azure-login` | Ensure the Azure CLI has a valid login (runs `az login` if not) |
 | `make azure-plan` | Register providers, `fmt`, `validate`, and `plan` |
 | `make azure-deploy` | Create/update the full stack, import the GHCR image into ACR, deploy the web app, and wait for HTTP 200 |
@@ -239,6 +265,97 @@ GitHub Actions only builds and publishes to GHCR; it has no cloud credentials. D
 | `make gcp-url` | Print the app URL |
 | `make gcp-logs` | Show recent Cloud Run logs |
 | `make gcp-destroy` | Destroy all GCP resources |
+
+## AWS EKS Option
+
+EKS is an independent alternative to ECS, with its own Terraform state in
+`terraform/aws-eks`. It provisions a dedicated VPC, two managed x86-64 EC2 nodes,
+an ECR repository, an internet-facing ALB, and three DynamoDB tables. The shared
+Helm chart deploys Flask; Terraform seeds roster and schedule from `data/`.
+There is no in-cluster DynamoDB or seed job in this configuration.
+
+```mermaid
+flowchart LR
+    Browser[Browser or API client] -->|HTTP 80 or HTTPS 443| ALB[Internet-facing ALB]
+    subgraph VPC[Dedicated EKS VPC - two public subnets]
+        ALB -->|Only ALB security group allowed| NP[NodePort 32080]
+        subgraph Nodes[Managed EC2 node group - two nodes]
+            NP -->|Service routes to port 5000| App[Flask pods]
+            Agent[EKS Pod Identity agent]
+        end
+        Registry[(Dedicated ECR)] -. image pull .-> App
+    end
+    App -->|AWS SDK credentials| Agent
+    Agent -->|Assume scoped app role| IAM[IAM role]
+    App -->|Authorized DynamoDB calls| DB[(Cluster-prefixed DynamoDB tables)]
+    IAM -. table-scoped permissions .-> DB
+    TF[Terraform] -->|Provision and seed| DB
+    TF -->|Provision| VPC
+    Helm[Helm] -->|Deploy| App
+```
+
+### First Deployment and Images
+
+Requires Terraform >= 1.7, AWS CLI v2 with a configured profile, a running Docker
+daemon, Helm, kubectl, and Python 3. Deploy from scratch with one command:
+
+```bash
+make eks-deploy
+```
+
+The command checks tools and Docker, logs in to AWS SSO if needed, initializes
+Terraform, and prompts for approval before provisioning. It then logs Docker in
+to ECR, refreshes scores, builds the current working copy for `linux/amd64`, pushes
+the configured tag, updates kubeconfig, installs/upgrades Helm, and waits for the
+pod rollout. It prints the ALB URL. Defaults are `AWS_PROFILE=master` and
+`AWS_REGION=us-east-1`; override either on the command line when needed.
+
+Run the same command after local app changes to rebuild and redeploy, including
+changes not yet merged to `main`. Terraform approval and interactive SSO login
+are retained; a single command does not bypass either. Build/push failures stop
+before Helm installation. The first deployment can take 15-25 minutes plus image
+build time and incurs AWS charges.
+
+To use a pre-published image instead, set Terraform's `image_repository` and
+`image_tag`; `eks-deploy` then skips local image publishing. That image must
+include the EKS table-name overrides. `make eks-push` only re-pulls the configured
+image, while `make eks-image-local` builds/pushes to the stack's ECR repository
+without changing infrastructure or installing Helm. Both use the last applied
+Terraform outputs; apply changes to image settings before using them.
+
+### Access and Identity
+
+- The ALB forwards to an instance target group attached to the node group's Auto Scaling group, then NodePort 32080 and the Flask pods. No AWS Load Balancer Controller or Ingress resource is needed.
+- App access defaults to public HTTP. Set `alb_ingress_cidrs` to restrict clients. An ACM `alb_certificate_arn` plus matching `alb_hostname` enables HTTPS, HTTP redirection, and Secure session cookies; certificate issuance and DNS are managed separately.
+- The EKS API also defaults to `public_access_cidrs = ["0.0.0.0/0"]`. This permits network access, not anonymous cluster access: IAM authentication and Kubernetes authorization remain required. The ALB and API allowlists are independent.
+- Set `public_alb_enabled = false` for ClusterIP-only app access through `make eks-open` at http://localhost:8082. This does not restrict the cluster API.
+- Pod Identity maps the app service account to a role scoped to `<cluster_name>-players`, `<cluster_name>-schedule`, and `<cluster_name>-users`. No static AWS keys are injected. EC2 metadata requires IMDSv2 with a hop limit of one.
+- Terraform generates admin/viewer passwords and the session key. Retrieve passwords with `terraform -chdir=terraform/aws-eks output -json bootstrap_passwords`; usernames are `admin` and `viewer`. Protect local state, Kubernetes Secrets, and Helm release history.
+
+### Verification and Cleanup
+
+Use `make eks-status` and `make eks-logs` for diagnostics. Verify real requests
+through the URL returned by `make eks-url`:
+
+```bash
+BASE=$(terraform -chdir=terraform/aws-eks output -raw app_url)
+curl --fail "$BASE/api/v1/games"
+curl --fail "$BASE/api/v1/players"
+```
+
+Pod readiness and ALB health checks fetch a static image, so a Ready pod does
+not prove DynamoDB access or login works. Test the API and authenticated session
+flow described above, not only the health endpoint.
+
+This intentionally vulnerable lab is publicly reachable by default. Use synthetic
+data and disposable accounts, restrict tester IPs where possible, and use HTTPS
+before sending non-disposable credentials. EKS, EC2, EBS, the ALB, public IPv4,
+CloudWatch, ECR, and DynamoDB/PITR incur charges; there is no scale-to-zero.
+`make eks-destroy` deletes the EKS deployment, tables, and ECR images;
+`make aws-destroy` only destroys the separate ECS stack.
+
+See [the EKS guide](docs/eks.md) for additional configuration and credential-free
+Terraform/Helm checks.
 
 ## Local Testing (Docker)
 
