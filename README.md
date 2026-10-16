@@ -204,6 +204,10 @@ Use only against deployments you own; requests can incur cloud charges.
 
 ### Expected Findings
 
+See [Intentional Vulnerabilities and Validation](docs/security-validation.md)
+for the complete lab inventory, viewer-session curl commands, expected HTTP
+results, mutation cleanup, and deployment-specific IAM caveats.
+
 | Scenario | Reproduction with a viewer session | Expected result |
 | --- | --- | --- |
 | Broken function-level authorization (API5) | POST/PATCH/DELETE a player | Succeeds without admin role; HTML admin writes are restricted |
