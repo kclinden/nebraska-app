@@ -127,7 +127,26 @@ EKS_PORT ?= 8082
 EKS_NS = $(shell $(EKS_TF) output -raw namespace)
 EKS_KUBECTL = kubectl --context $(EKS_CONTEXT) --namespace $(EKS_NS)
 
-.PHONY: eks-url eks-preflight eks-image eks-image-local eks-ecr-login
+.PHONY: eks-url eks-preflight eks-image eks-image-local eks-ecr-login api-traffic eks-traffic
+
+API_URL ?=
+DURATION ?= 30
+RATE ?= 10
+WORKERS ?= 4
+REQUEST_TIMEOUT ?= 10
+
+api-traffic: ## Generate bounded read-only API traffic (defaults to the EKS ALB URL)
+	@set -e; url="$(API_URL)"; \
+	if test -z "$$url"; then \
+		url="$$($(EKS_TF) output -raw app_url 2>/dev/null)" || { echo "Cannot resolve EKS URL; pass API_URL=http://your-app-host." >&2; exit 1; }; \
+	fi; \
+	if test -z "$$url" || test "$$url" = "null"; then \
+		echo "No public EKS URL; pass API_URL=http://localhost:8082 after port-forwarding." >&2; exit 1; \
+	fi; \
+	python3 scripts/api_traffic.py --url "$$url" --duration "$(DURATION)" --rate "$(RATE)" \
+		--workers "$(WORKERS)" --timeout "$(REQUEST_TIMEOUT)"
+
+eks-traffic: api-traffic ## Generate bounded API traffic against the EKS deployment
 
 eks-preflight:
 	@for tool in terraform aws docker helm kubectl python3; do \

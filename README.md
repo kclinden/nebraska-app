@@ -175,6 +175,33 @@ The OpenAPI 3.0 specification is served at `/openapi.json`. Public endpoints lis
 | `/api/v1/reports` | GET | Current user's reports |
 | `/api/v1/reports/{id}` | GET | Private report lookup |
 
+### API Traffic Test
+
+From the repository root, generate bounded read-only traffic against the EKS URL
+stored in local Terraform state:
+
+```bash
+make api-traffic
+```
+
+`make eks-traffic` is an alias. From the `scripts` directory, use
+`make -C .. api-traffic`. The defaults are 30 seconds, at most 10 requests/second,
+four concurrent requests, and a 10-second request timeout. No AWS login is needed
+to read the URL from existing local state.
+
+```bash
+make api-traffic DURATION=60 RATE=5 WORKERS=2 REQUEST_TIMEOUT=15
+make api-traffic API_URL=http://localhost:8080
+```
+
+An explicit `API_URL` bypasses Terraform, including for private deployments
+accessed through port-forwarding. The script sends only GET requests to games,
+players, a player search, and the OpenAPI schema; it reports status counts and
+median/p95/max latency. Exit code 1 means at least one request failed or returned
+invalid data; timeouts are not hidden or treated as successful traffic. Safety
+limits are 300 seconds, 50 requests/second, 16 workers, and a 30-second timeout.
+Use only against deployments you own; requests can incur cloud charges.
+
 ### Expected Findings
 
 | Scenario | Reproduction with a viewer session | Expected result |
@@ -319,6 +346,8 @@ EKS uses Terraform for AWS resources and Helm for the app; `make eks-deploy` pro
 | `make local-reseed` | Re-run the DynamoDB Local seeder |
 | `make local-sync` | Synchronize ESPN roster/schedule into the local database without rebuilding |
 | `make scores` | Refresh `app/scores.json` from ESPN |
+| `make api-traffic` | Generate bounded read-only traffic; discover EKS URL or override with `API_URL` |
+| `make eks-traffic` | Alias for `make api-traffic` |
 | `make aws-login` | Ensure an AWS SSO session is active (runs `aws sso login` if expired) |
 | `make aws-plan` | `fmt`, `validate`, and `plan` |
 | `make aws-deploy` | Create/update the full stack, copy the GHCR image to ECR, and roll out ECS |
