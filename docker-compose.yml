@@ -1,4 +1,4 @@
-# Local test stack: DynamoDB Local + seeder + app. Run with: docker compose up --build
+# Local test stack: DynamoDB Local + seeder + ESPN sync + app. Run with: docker compose up --build
 x-local-aws: &local-aws
   AWS_ENDPOINT_URL_DYNAMODB: http://dynamodb-local:8000
   AWS_REGION: us-east-1
@@ -24,6 +24,16 @@ services:
       - ./scripts:/scripts:ro
       - ./data:/data:ro
     command: sh -c "pip install -q --root-user-action=ignore boto3 pyyaml && python /scripts/seed_local_dynamodb.py"
+
+  sports-sync:
+    build: ./app
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    environment:
+      <<: *local-aws
+      ESPN_SEASON: ${ESPN_SEASON:-2026}
+    command: ["python", "-m", "espn"]
 
   app:
     build: ./app

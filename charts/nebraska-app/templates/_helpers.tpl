@@ -32,3 +32,34 @@ allowPrivilegeEscalation: false
 capabilities:
   drop: ["ALL"]
 {{- end -}}
+
+{{- define "nebraska-app.syncPod" -}}
+restartPolicy: Never
+{{- if or .Values.serviceAccount.create .Values.serviceAccount.name }}
+serviceAccountName: {{ include "nebraska-app.serviceAccount" . }}
+{{- end }}
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  seccompProfile:
+    type: RuntimeDefault
+containers:
+  - name: espn-sync
+    image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+    imagePullPolicy: {{ .Values.image.pullPolicy }}
+    command: ["python", "-m", "espn"]
+    envFrom:
+      - secretRef:
+          name: {{ include "nebraska-app.fullname" . }}-aws
+    env:
+      - name: ESPN_SEASON
+        value: {{ .Values.sportsData.season | quote }}
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+    securityContext:
+      {{- include "nebraska-app.restrictedContainer" . | nindent 6 }}
+{{- end -}}

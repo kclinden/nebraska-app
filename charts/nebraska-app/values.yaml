@@ -6,6 +6,13 @@ image:
 
 replicaCount: 1
 
+sportsData:
+  source: synced
+  season: "2026"
+  sync:
+    enabled: true
+    schedule: "*/15 * * * *"
+
 serviceAccount:
   create: false
   name: ""

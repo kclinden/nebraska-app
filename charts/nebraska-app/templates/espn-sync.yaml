@@ -1,0 +1,47 @@
+{{- if and .Values.sportsData.sync.enabled (eq .Values.sportsData.source "synced") }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "nebraska-app.fullname" . }}-espn-sync
+  labels:
+    {{- include "nebraska-app.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.sportsData.sync.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 180
+      template:
+        metadata:
+          labels:
+            {{- include "nebraska-app.selector" . | nindent 12 }}
+            app.kubernetes.io/component: espn-sync
+        spec:
+          {{- include "nebraska-app.syncPod" . | nindent 10 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "nebraska-app.fullname" . }}-espn-initial-sync
+  labels:
+    {{- include "nebraska-app.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 180
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        {{- include "nebraska-app.selector" . | nindent 8 }}
+        app.kubernetes.io/component: espn-sync
+    spec:
+      {{- include "nebraska-app.syncPod" . | nindent 6 }}
+{{- end }}

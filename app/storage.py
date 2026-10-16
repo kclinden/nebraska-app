@@ -1,9 +1,17 @@
-"""Roster/schedule storage chosen by STORAGE_BACKEND: DynamoDB (AWS and local), Azure Table Storage, or Firestore."""
+"""Cloud-backed accounts, roster/schedule snapshots, and persistent admin overrides."""
 import hashlib
+import json
 import os
 
 PLAYERS_TABLE = "NebraskaPlayers"
 SCHEDULE_TABLE = "NebraskaSchedule2026"
+
+
+def snapshot_json(data):
+    payload = json.dumps(data, separators=(",", ":"))
+    if len(payload.encode("utf-16-le")) > 60000:
+        raise ValueError("Sports snapshot exceeds the portable database property limit")
+    return payload
 
 
 class RecordStore:
@@ -52,10 +60,21 @@ class DynamoStore(RecordStore):
         return records
 
     def list_players(self):
-        return self.players.scan().get("Items", [])
+        return [item for item in self.players.scan().get("Items", []) if item.get("Kind") != "sports_snapshot"]
 
     def list_games(self):
-        return self.schedule.scan().get("Items", [])
+        return [item for item in self.schedule.scan().get("Items", []) if item.get("Kind") != "sports_snapshot"]
+
+    def get_sports_snapshot(self, kind):
+        table = self.players if kind == "players" else self.schedule
+        key = {"JerseyNumber": -1, "PlayerName": "__espn_snapshot__"} if kind == "players" else {"GameId": -1}
+        item = table.get_item(Key=key, ConsistentRead=True).get("Item")
+        return json.loads(item["Payload"]) if item else None
+
+    def save_sports_snapshot(self, kind, data):
+        table = self.players if kind == "players" else self.schedule
+        key = {"JerseyNumber": -1, "PlayerName": "__espn_snapshot__"} if kind == "players" else {"GameId": -1}
+        table.put_item(Item=dict(key, Kind="sports_snapshot", Payload=snapshot_json(data)))
 
     def add_player(self, jersey, name, position):
         self.players.put_item(Item={"JerseyNumber": jersey, "PlayerName": name, "Name": name, "Position": position})
@@ -110,15 +129,34 @@ class AzureTableStore(RecordStore):
             return False
 
     def list_players(self):
-        return [dict(e) for e in self.players.list_entities()]
+        return [dict(entity) for entity in self.players.list_entities() if entity.get("Kind") != "sports_snapshot"]
 
     def list_games(self):
         games = []
         for e in self.schedule.list_entities():
+            if e.get("Kind") == "sports_snapshot":
+                continue
             game = dict(e)
             game["Home"] = str(game.get("Home")).lower() == "true"
             games.append(game)
         return games
+
+    def get_sports_snapshot(self, kind):
+        from azure.core.exceptions import ResourceNotFoundError
+
+        table = self.players if kind == "players" else self.schedule
+        try:
+            entity = table.get_entity("__espn_sync__", "snapshot")
+        except ResourceNotFoundError:
+            return None
+        return json.loads(entity["Payload"])
+
+    def save_sports_snapshot(self, kind, data):
+        table = self.players if kind == "players" else self.schedule
+        table.upsert_entity({
+            "PartitionKey": "__espn_sync__", "RowKey": "snapshot",
+            "Kind": "sports_snapshot", "Payload": snapshot_json(data),
+        })
 
     def add_player(self, jersey, name, position):
         self.players.upsert_entity({
@@ -167,10 +205,19 @@ class FirestoreStore(RecordStore):
             return False
 
     def list_players(self):
-        return [d.to_dict() for d in self.players.stream()]
+        return [item for document in self.players.stream() if (item := document.to_dict()).get("Kind") != "sports_snapshot"]
 
     def list_games(self):
-        return [d.to_dict() for d in self.schedule.stream()]
+        return [item for document in self.schedule.stream() if (item := document.to_dict()).get("Kind") != "sports_snapshot"]
+
+    def get_sports_snapshot(self, kind):
+        collection = self.players if kind == "players" else self.schedule
+        item = collection.document("espn-snapshot").get().to_dict()
+        return json.loads(item["Payload"]) if item else None
+
+    def save_sports_snapshot(self, kind, data):
+        collection = self.players if kind == "players" else self.schedule
+        collection.document("espn-snapshot").set({"Kind": "sports_snapshot", "Payload": snapshot_json(data)})
 
     def add_player(self, jersey, name, position):
         self.players.document(f"{jersey}-{_row_key(name)}").set(
@@ -184,7 +231,16 @@ class FirestoreStore(RecordStore):
 def get_store():
     backend = os.environ.get("STORAGE_BACKEND", "dynamodb")
     if backend == "azure_table":
-        return AzureTableStore()
-    if backend == "firestore":
-        return FirestoreStore()
-    return DynamoStore()
+        store = AzureTableStore()
+    elif backend == "firestore":
+        store = FirestoreStore()
+    else:
+        store = DynamoStore()
+    source = os.environ.get("SPORTS_DATA_SOURCE", "synced")
+    if source == "storage":
+        return store
+    if source != "synced":
+        raise ValueError("SPORTS_DATA_SOURCE must be synced or storage")
+    from espn import SyncedSportsStore
+
+    return SyncedSportsStore(store)

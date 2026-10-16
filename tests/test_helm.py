@@ -48,7 +48,7 @@ class HelmTests(unittest.TestCase):
         deployment = next(item for item in documents if item["kind"] == "Deployment")
         self.assertEqual(deployment["spec"]["template"]["spec"]["serviceAccountName"], "nebraska-app")
         self.assertTrue(any(item["kind"] == "ServiceAccount" for item in documents))
-        self.assertFalse(any(item["kind"] == "Job" or item["metadata"]["name"].endswith("-dynamodb") for item in documents))
+        self.assertFalse(any(item["metadata"]["name"].endswith(("-seed", "-dynamodb")) for item in documents))
         service = next(item for item in documents if item["kind"] == "Service")
         self.assertEqual(service["spec"]["type"], "ClusterIP")
 
@@ -66,6 +66,35 @@ class HelmTests(unittest.TestCase):
             "seed.enabled=false,dynamodb.enabled=false,dynamodb.useStaticCredentials=false,service.type=NodePort",
         ], cwd=self.root, capture_output=True, text=True, check=True)
         self.assertIn("make eks-url", result.stdout)
+
+    def test_sports_source_configuration(self):
+        for values, source in (([], "synced"), (["--set", "sportsData.source=storage"], "storage")):
+            with self.subTest(source=source):
+                documents = self.render(*values)
+                deployment = next(item for item in documents if item["kind"] == "Deployment" and item["metadata"]["name"] == "nebraska-app")
+                environment = {entry["name"]: entry["value"] for entry in deployment["spec"]["template"]["spec"]["containers"][0]["env"]}
+                self.assertEqual(environment["SPORTS_DATA_SOURCE"], source)
+                self.assertNotIn("ESPN_CACHE_SECONDS", environment)
+                self.assertEqual(environment["ESPN_SEASON"], "2026")
+
+    def test_scheduled_and_initial_sync_share_pod_identity(self):
+        documents = self.render("--set", "seed.enabled=false,dynamodb.enabled=false,dynamodb.useStaticCredentials=false,serviceAccount.create=true")
+        cron = next(item for item in documents if item["kind"] == "CronJob")
+        self.assertEqual(cron["spec"]["schedule"], "*/15 * * * *")
+        self.assertEqual(cron["spec"]["concurrencyPolicy"], "Forbid")
+        initial = next(item for item in documents if item["kind"] == "Job")
+        self.assertEqual(initial["metadata"]["annotations"]["helm.sh/hook-weight"], "10")
+        for pod in (cron["spec"]["jobTemplate"]["spec"]["template"]["spec"], initial["spec"]["template"]["spec"]):
+            self.assertEqual(pod["serviceAccountName"], "nebraska-app")
+            container = pod["containers"][0]
+            self.assertEqual(container["command"], ["python", "-m", "espn"])
+            self.assertEqual(container["envFrom"], [{"secretRef": {"name": "nebraska-app-aws"}}])
+
+    def test_legacy_mode_or_disabled_sync_has_no_sync_jobs(self):
+        for settings in ("sportsData.source=storage", "sportsData.sync.enabled=false"):
+            with self.subTest(settings=settings):
+                documents = self.render("--set", settings)
+                self.assertFalse(any("espn-sync" in item["metadata"]["name"] or "espn-initial-sync" in item["metadata"]["name"] for item in documents))
 
 
 if __name__ == "__main__":

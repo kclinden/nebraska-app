@@ -33,7 +33,7 @@ endif
 step = @printf '\n\033[1;36m==> %s\033[0m\n' "$(1)"
 
 .DEFAULT_GOAL := help
-.PHONY: help setup-check scores local-up local-down local-restart local-logs local-reseed \
+.PHONY: help setup-check scores local-up local-down local-restart local-logs local-reseed local-sync \
         k8s-up k8s-image-local k8s-open k8s-status k8s-logs k8s-reseed k8s-down \
 		eks-init eks-plan eks-deploy eks-kubeconfig eks-app eks-push eks-open eks-status eks-logs eks-destroy \
         aws-login aws-init aws-plan aws-deploy aws-ecr-login aws-image aws-image-local aws-push \
@@ -68,6 +68,9 @@ local-logs: ## Tail logs from the local stack
 
 local-reseed: ## Re-run the DynamoDB Local seeder from data/*.yaml
 	docker compose run --rm seed
+
+local-sync: ## Refresh the local roster/schedule database from ESPN without rebuilding
+	docker compose run --rm sports-sync
 
 # ---------- Local Kubernetes (Helm chart in charts/nebraska-app) ----------
 
