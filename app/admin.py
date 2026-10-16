@@ -319,6 +319,13 @@ def register_admin(app, store, scores):
 
         return jsonify(specification())
 
+    @app.get("/docs")
+    @app.get("/docs/")
+    def api_docs():
+        from api_definition import DOCS_PAGE
+
+        return DOCS_PAGE
+
     @app.errorhandler(400)
     @app.errorhandler(403)
     @app.errorhandler(404)

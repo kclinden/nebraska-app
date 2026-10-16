@@ -174,6 +174,20 @@ class AdminTests(unittest.TestCase):
         self.assertEqual(len(restarted.list_players()), 2)
         self.assertEqual(self.store.players, [])
 
+    def test_api_docs_are_public_and_database_independent(self):
+        with patch.dict(os.environ, {"ADMIN_PASSWORD": "", "VIEWER_PASSWORD": ""}), patch.object(
+            self.store, "get_record", side_effect=AssertionError("Documentation must not query the database")
+        ):
+            for path in ("/docs", "/docs/"):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.mimetype, "text/html")
+                self.assertIn("SwaggerUIBundle", response.text)
+                self.assertIn('url: "/openapi.json"', response.text)
+                self.assertIn("withCredentials: true", response.text)
+                self.assertIn("validatorUrl: null", response.text)
+            self.assertEqual(self.client.get("/openapi.json").status_code, 200)
+
     def test_dynamodb_decimal_version(self):
         self.client.get("/admin/login")
         for record in self.store.records.values():
