@@ -41,7 +41,11 @@ This is an intentionally vulnerable security-testing application, not a producti
 - **Program Legacy**: national/conference titles, Heisman winners, all-time wins, and the sellout streak, next to a Memorial Stadium photo.
 - **Play Hail Varsity**: plays the fight song in the browser (Web Audio).
 
-Scores and stats come from ESPN and are baked into the image at build time; the weekly GitHub Actions build refreshes them after each game. Roster and schedule live in DynamoDB (AWS/local), Azure Table Storage, or Firestore (GCP).
+Scores and detailed stats come from ESPN and are baked into the image at build time;
+the weekly GitHub Actions build refreshes them after each game. Roster and schedule
+are synchronized from ESPN into the cloud database by a separate job. The app
+reads the database on every request, preserving database-backed CRUD and security
+testing. Accounts and admin roster overrides remain in the database too.
 
 ## Getting Started
 
@@ -51,6 +55,81 @@ make local-up      # http://localhost:8080
 ```
 
 Local Docker and Helm seed `admin` / `local-admin-password` and `viewer` / `local-viewer-password` on the first admin/API request. These are disposable local-only defaults. Bootstrap passwords are hashed in `NebraskaUsers`; re-seeding or redeploying does not reset existing accounts.
+
+### ESPN-to-Database Sync
+
+The page and `/api/v1/players` and `/api/v1/games` always read the configured
+database, never ESPN. A separate sync fetches ESPN's roster and schedule,
+validates both complete responses, then replaces their database snapshots. No
+app rebuild is required to pick up later syncs.
+
+```mermaid
+flowchart LR
+    ESPN[ESPN roster and schedule] --> Sync[Scheduled sync job]
+    Sync --> SportsDB[(Roster and schedule tables)]
+    SportsDB --> App[Flask page and API]
+    Admin[Admin edits] --> Overrides[(Database overrides)]
+    Overrides --> App
+```
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `SPORTS_DATA_SOURCE` | `synced` | Read database snapshots plus overrides; `storage` uses the original seeded rows and CRUD |
+| `ESPN_SEASON` | `2026` | Four-digit schedule season, matching the app's current season |
+
+Helm runs an initial post-install/upgrade Job after seeding and a CronJob every
+15 minutes. Both use the app image and its database credentials/Pod Identity.
+Configure `sportsData.sync.schedule`, `sportsData.sync.enabled`,
+`sportsData.source`, and `sportsData.season`. Scheduled executions cannot overlap;
+initial hooks and manually launched syncs are separate jobs, so avoid triggering
+them concurrently. A failed initial sync makes Helm report a failed deployment,
+but already-created app pods can still serve seeded/previous database data.
+
+ESPN calls time out after five seconds. A fetch, schema-validation, empty-feed,
+or snapshot-size failure occurs before any database writes. Each collection is
+published atomically as a JSON snapshot in its original sports table; snapshots
+are not stored in the user table or in worker memory. Replacement naturally
+removes old ESPN entries from the app view without deleting seed rows or admin
+overrides. Snapshot reads preserve stable ESPN athlete/event IDs.
+
+The roster and schedule writes are atomic individually, not a cross-table
+transaction. A database failure between them can leave collections at different
+sync ages; the success marker advances only after both writes finish. A retry
+repairs this without first clearing any data. Snapshots are limited to 60 KB of
+UTF-16 JSON so they fit Azure Table properties as well as DynamoDB/Firestore.
+Until the first successful sync, reads use the existing YAML-seeded database.
+
+Roster add/update/delete operations remain available. In synced mode they create
+persistent `roster_override` records alongside accounts and reports: additions
+and position edits override the ESPN baseline, and deletions hide a matching
+jersey/name. These overrides survive refreshes and app restarts; they do not
+modify ESPN. Existing edits in the old seeded roster are not automatically
+imported as overrides. Re-add a hidden player through the roster UI/API to restore
+it. In `storage` mode, writes continue to modify the original roster table.
+
+Docker Compose launches a one-shot sync after seeding; the app can serve seed
+data while it runs. Repeat it without rebuilding with `make local-sync`. For ECS,
+Azure, or GCP, run `python -m espn` inside the app image with that deployment's
+database environment/identity, and schedule the same command using that cloud's
+job scheduler. This branch automates scheduling for Helm/EKS only; no additional
+cloud schedulers are provisioned.
+
+Preview ESPN data without database access:
+
+```bash
+PYTHONPATH=app python3 -m espn --dry-run
+```
+
+Inspect the `espn-sync-status` record in the account/records table for the last
+successful sync timestamp, season, and collection counts. Sync jobs need outbound
+HTTPS to `site.api.espn.com`; normal web requests do not. ESPN's public feeds have
+no uptime or schema guarantee, so retain the last successful database data on
+outages rather than claiming instant freshness.
+
+Game numbers remain chronological 1-based values for existing links and API
+routes; `EspnEventId` exposes ESPN's event identifier. Game dates use Central time
+so evening games are not shifted to the following UTC calendar day. Scores,
+box-score stats, and leaders still follow the build-time refresh workflow.
 
 ## Admin and API
 
@@ -106,7 +185,9 @@ Focused checks: `docker build -t nebraska-app:test ./app` then `docker run --rm 
 
 ## Architecture
 
-One container image runs everywhere; only the data backend changes, selected by `STORAGE_BACKEND` in `app/storage.py`.
+One container image runs everywhere. `STORAGE_BACKEND` selects the cloud database
+for accounts, overrides, and synchronized sports snapshots. `SPORTS_DATA_SOURCE`
+selects synced snapshots or original seeded rows; both read only the database.
 
 ```mermaid
 flowchart LR
@@ -116,6 +197,7 @@ flowchart LR
         GHA --> GHCR[(GHCR<br/>nebraska-app:latest)]
     end
     ESPN -- scores + stats --> GHA
+    ESPN -- roster and schedule --> SportsSync[ESPN-to-database sync]
 
     subgraph Dev[Developer machine]
         Make[make targets]
@@ -154,6 +236,11 @@ flowchart LR
     Data -- terraform --> EKSDDB
     Data -- terraform --> Tables
     Data -- terraform --> FS
+    SportsSync --> DDBL
+    SportsSync --> DDB
+    SportsSync --> EKSDDB
+    SportsSync --> Tables
+    SportsSync --> FS
     Make --> Compose
     Make -- Terraform + Helm --> EKSPods
     Source -. make eks-image-local .-> EKSECR
@@ -189,7 +276,7 @@ sequenceDiagram
 | Container runtime | Docker Compose | ECS Fargate (0.25 vCPU / 512 MB) | EKS, 2 managed `t3.medium` nodes | App Service, Linux B1 plan (1 vCPU / 1.75 GB) | Cloud Run (1 vCPU / 512 MiB, scales 0-1) |
 | Ingress | `localhost:8080` | ALB, HTTP :80 | Public ALB to NodePort 32080; optional ACM HTTPS | Managed HTTPS ingress | Managed HTTPS (`*.run.app`) |
 | Image source | Local build | ECR (copied from GHCR) | Working copy built/pushed to dedicated ECR; repository override supported | ACR (imported from GHCR) | Artifact Registry (copied from GHCR) |
-| Data | DynamoDB Local (in-memory) | DynamoDB | Dedicated DynamoDB tables, encryption and PITR | Table Storage | Firestore (Native mode) |
+| Data | DynamoDB Local with ESPN snapshots and overrides | DynamoDB with ESPN snapshots and overrides | Dedicated DynamoDB with ESPN snapshots, encryption and PITR | Table Storage with ESPN snapshots and overrides | Firestore with ESPN snapshots and overrides |
 | App identity | Dummy keys | ECS task role | Service account with EKS Pod Identity | User-assigned managed identity | Service account `husker-app-run` |
 | Network | Compose network | VPC, 2 public subnets, IGW | Separate VPC, 2 public subnets, IGW; no NAT or SSH | App Service multi-tenant front end | Cloud Run managed |
 | Logs | `docker compose logs` | CloudWatch `/ecs/husker-app` | `make eks-logs`; control-plane logs in CloudWatch | App Service log stream (`make azure-logs`) | Cloud Logging (`make gcp-logs`) |
@@ -200,8 +287,8 @@ EKS uses Terraform for AWS resources and Helm for the app; `make eks-deploy` pro
 
 ## Repository Layout
 
-- `app/` application source, `Dockerfile`, and related assets; `storage.py` selects DynamoDB, Azure Table Storage, or Firestore via `STORAGE_BACKEND`
-- `data/` roster and schedule YAML, shared by local seeding and every cloud stack
+- `app/` application source, `Dockerfile`, and related assets; `espn.py` synchronizes sports data into the database, while `storage.py` selects cloud storage via `STORAGE_BACKEND`
+- `data/` fallback roster and schedule YAML, shared by local seeding and every cloud stack
 - `scripts/` developer setup check, score fetcher, and DynamoDB Local seeder
 - `docs/` README assets (app screenshot)
 - `terraform/aws/` AWS stack (VPC, ECS Fargate, ALB, ECR, DynamoDB, IAM)
@@ -222,6 +309,7 @@ EKS uses Terraform for AWS resources and Helm for the app; `make eks-deploy` pro
 | `make local-restart` | Rebuild and restart with fresh data |
 | `make local-logs` | Tail container logs |
 | `make local-reseed` | Re-run the DynamoDB Local seeder |
+| `make local-sync` | Synchronize ESPN roster/schedule into the local database without rebuilding |
 | `make scores` | Refresh `app/scores.json` from ESPN |
 | `make aws-login` | Ensure an AWS SSO session is active (runs `aws sso login` if expired) |
 | `make aws-plan` | `fmt`, `validate`, and `plan` |
@@ -366,10 +454,11 @@ make local-up     # http://localhost:8080
 make local-down
 ```
 
-`docker-compose.yml` runs three services:
+`docker-compose.yml` runs four services:
 
 - `dynamodb-local` - [Amazon DynamoDB Local](https://hub.docker.com/r/amazon/dynamodb-local), in-memory, exposed on `localhost:8000`.
 - `seed` - runs `scripts/seed_local_dynamodb.py` to create the `NebraskaPlayers` and `NebraskaSchedule2026` tables and load `data/roster.yaml` and `data/schedule.yaml`.
+- `sports-sync` - runs `python -m espn` after seeding to publish ESPN roster/schedule snapshots to DynamoDB Local.
 - `app` - the app image, started after seeding succeeds.
 
 The app needs no code changes to run locally: boto3 honors `AWS_ENDPOINT_URL_DYNAMODB`, which compose points at `dynamodb-local`. Credentials are dummy values. Data is reset every time the stack stops; roster add/remove changes are not persisted.

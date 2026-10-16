@@ -18,6 +18,13 @@ class MemoryStore:
     def __init__(self):
         self.records = {}
         self.players = []
+        self.snapshots = {}
+
+    def get_sports_snapshot(self, kind):
+        return copy.deepcopy(self.snapshots.get(kind))
+
+    def save_sports_snapshot(self, kind, data):
+        self.snapshots[kind] = copy.deepcopy(data)
 
     def get_record(self, identity):
         return copy.deepcopy(self.records.get(identity))
@@ -139,6 +146,33 @@ class AdminTests(unittest.TestCase):
         document = self.client.get("/openapi.json").json
         self.assertEqual(document["openapi"], "3.0.3")
         self.assertIn("/api/v1/reports/{id}", document["paths"])
+
+    def test_synced_sports_api_preserves_accounts_and_roster_writes(self):
+        from espn import SyncedSportsStore, sync_sports
+        from test_espn_sync import ROSTER, SCHEDULE
+
+        fetcher = lambda url: ROSTER if url.endswith("/roster") else SCHEDULE
+        live_store = SyncedSportsStore(self.store)
+        sync_sports(live_store, fetcher=fetcher, season="2026")
+        live_app = Flask("live-sports")
+        live_app.config["TESTING"] = True
+        register_admin(live_app, live_store, {"ohio": {"Result": "W"}})
+        client = live_app.test_client()
+        games = client.get("/api/v1/games")
+        self.assertEqual(games.status_code, 200)
+        self.assertEqual(games.json[0]["EspnEventId"], "401858430")
+        self.assertEqual(len(client.get("/api/v1/players").json), 2)
+        self.assertEqual(self.login(client, "viewer", "test-viewer-password").status_code, 302)
+        created = client.post("/api/v1/players", json={"JerseyNumber": 90, "Name": "Local Player", "Position": "DL"})
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(len(client.get("/api/v1/players").json), 3)
+        self.assertEqual(client.patch("/api/v1/players/" + created.json["Id"], json={"Position": "LB"}).status_code, 200)
+        self.assertEqual(client.get("/api/v1/players?q=Local").json[0]["Position"], "LB")
+        self.assertEqual(len(client.get("/api/v1/reports").json), 1)
+        self.assertEqual(client.delete("/api/v1/players/" + created.json["Id"]).status_code, 204)
+        restarted = SyncedSportsStore(self.store)
+        self.assertEqual(len(restarted.list_players()), 2)
+        self.assertEqual(self.store.players, [])
 
     def test_dynamodb_decimal_version(self):
         self.client.get("/admin/login")

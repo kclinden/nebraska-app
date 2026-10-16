@@ -7,6 +7,37 @@ DynamoDB tables. Terraform seeds the
 shared roster and schedule; the local DynamoDB pod and Helm seed job are disabled.
 No AWS credentials are required to edit or run the mocked checks below.
 
+Roster and schedule reads always go to DynamoDB. An initial Helm hook and a
+15-minute CronJob run `python -m espn` to fetch and validate both ESPN feeds,
+then atomically replace each collection's snapshot in its existing sports table.
+The jobs use the app image and Pod Identity; the existing table-scoped
+GetItem/PutItem/Scan permissions suffice. No ESPN calls happen in web requests.
+Admin roster overrides remain separate records in the account table and survive
+syncs. Seed data is used until the first sync succeeds. Fetch/validation failures
+leave data untouched; database write failures can leave collections at different
+sync ages, with no new success marker until both writes complete.
+
+Configure `sportsData.source=synced`, `sportsData.season=2026`,
+`sportsData.sync.enabled=true`, and `sportsData.sync.schedule="*/15 * * * *"`.
+Set `sportsData.sync.enabled=false` to pause new scheduled/initial jobs, or
+`sportsData.source=storage` for the original seeded-row CRUD model. Existing
+running jobs may finish after disabling the CronJob. Scores and detailed stats
+are still baked into images.
+
+Inspect jobs and launch a manual sync without rebuilding:
+
+```sh
+kubectl --context nebraska-eks -n nebraska-app get cronjobs,jobs
+kubectl --context nebraska-eks -n nebraska-app create job \
+  --from=cronjob/nebraska-app-espn-sync "espn-sync-$(date +%s)"
+```
+
+Avoid running a manual sync while another sync is active. The CronJob forbids
+overlapping scheduled executions, but manual and initial-hook jobs are separate.
+The `espn-sync-status` record in the users table tracks the last successful sync.
+An initial sync failure causes Helm to report failure while deployed app pods can
+continue serving the last database snapshot or seeded rows.
+
 ## Before Deployment
 
 - Install Terraform >= 1.7, AWS CLI v2, Docker, Helm, kubectl, Python 3, and make.
