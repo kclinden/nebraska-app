@@ -151,6 +151,14 @@ Existing deployments need `make <cloud>-deploy` to provision account storage/sec
 
 ### API Discovery
 
+Interactive Swagger UI documentation is available at `/docs` (also `/docs/`).
+It loads `/openapi.json` from the same deployment and supports trying requests.
+Log in at `/admin/login` in the same browser to use its session cookie, or use
+the session endpoints below, copying the returned CSRF token into the required
+header for login/logout. The docs page is public; API authorization is unchanged.
+Swagger UI's pinned JavaScript/CSS assets load from jsDelivr, so the browser
+needs internet access to that CDN. No schema is sent to an external validator.
+
 The OpenAPI 3.0 specification is served at `/openapi.json`. Public endpoints list games and players; writes and user/report endpoints require a session. JSON scanner login flow:
 
 1. `GET /api/v1/session`, retaining the session cookie and the returned `csrf_token`.
