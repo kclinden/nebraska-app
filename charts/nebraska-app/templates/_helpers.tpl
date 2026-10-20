@@ -3,11 +3,18 @@
 {{- end -}}
 
 {{- define "nebraska-app.labels" -}}
+Application: {{ .Values.applicationName | quote }}
+app.kubernetes.io/part-of: {{ .Values.applicationName | lower | quote }}
 app.kubernetes.io/name: {{ .Chart.Name }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
+{{- end -}}
+
+{{- define "nebraska-app.annotations" -}}
+Application: {{ .Values.applicationName | quote }}
+app.kubernetes.io/part-of: {{ .Values.applicationName | lower | quote }}
 {{- end -}}
 
 {{- define "nebraska-app.selector" -}}

@@ -35,6 +35,24 @@ class HelmTests(unittest.TestCase):
         self.assertTrue(any(item["kind"] == "Job" for item in documents))
         self.assertFalse(any(item["kind"] == "ServiceAccount" for item in documents))
 
+    def test_application_metadata_is_consistent(self):
+        documents = self.render()
+        for item in documents:
+            with self.subTest(kind=item["kind"], name=item["metadata"]["name"]):
+                self.assertEqual(item["metadata"]["labels"]["Application"], "Husker-Roster-App")
+                self.assertEqual(item["metadata"]["labels"]["app.kubernetes.io/part-of"], "husker-roster-app")
+                self.assertEqual(item["metadata"]["annotations"]["Application"], "Husker-Roster-App")
+                self.assertEqual(item["metadata"]["annotations"]["app.kubernetes.io/part-of"], "husker-roster-app")
+
+                pod_template = None
+                if item["kind"] in ("Deployment", "Job"):
+                    pod_template = item["spec"]["template"]
+                elif item["kind"] == "CronJob":
+                    pod_template = item["spec"]["jobTemplate"]["spec"]["template"]
+                if pod_template:
+                    self.assertEqual(pod_template["metadata"]["labels"]["Application"], "Husker-Roster-App")
+                    self.assertEqual(pod_template["metadata"]["annotations"]["Application"], "Husker-Roster-App")
+
     def test_eks_identity(self):
         documents = self.render(
             "--set", "seed.enabled=false,dynamodb.enabled=false,dynamodb.useStaticCredentials=false",

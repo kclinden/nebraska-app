@@ -6,6 +6,8 @@ metadata:
   labels:
     {{- include "nebraska-app.labels" . | nindent 4 }}
     app.kubernetes.io/component: dynamodb
+  annotations:
+    {{- include "nebraska-app.annotations" . | nindent 4 }}
 spec:
   replicas: 1
   selector:
@@ -15,8 +17,10 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "nebraska-app.selector" . | nindent 8 }}
+        {{- include "nebraska-app.labels" . | nindent 8 }}
         app.kubernetes.io/component: dynamodb
+      annotations:
+        {{- include "nebraska-app.annotations" . | nindent 8 }}
     spec:
       containers:
         - name: dynamodb
@@ -44,6 +48,8 @@ metadata:
   name: {{ include "nebraska-app.fullname" . }}-dynamodb
   labels:
     {{- include "nebraska-app.labels" . | nindent 4 }}
+  annotations:
+    {{- include "nebraska-app.annotations" . | nindent 4 }}
 spec:
   selector:
     {{- include "nebraska-app.selector" . | nindent 4 }}

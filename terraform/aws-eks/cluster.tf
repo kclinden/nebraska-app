@@ -65,6 +65,20 @@ resource "aws_iam_role_policy_attachment" "nodes" {
 resource "aws_launch_template" "nodes" {
   name_prefix = "${var.cluster_name}-"
 
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Application = "Husker-Roster-App"
+    }
+  }
+
+  tag_specifications {
+    resource_type = "volume"
+    tags = {
+      Application = "Husker-Roster-App"
+    }
+  }
+
   metadata_options {
     http_tokens                 = "required"
     http_put_response_hop_limit = 1
@@ -87,6 +101,10 @@ resource "aws_eks_node_group" "main" {
   subnet_ids      = aws_subnet.public[*].id
   instance_types  = [var.node_instance_type]
   ami_type        = "AL2023_x86_64_STANDARD"
+  labels = {
+    Application                 = "Husker-Roster-App"
+    "app.kubernetes.io/part-of" = "husker-roster-app"
+  }
 
   launch_template {
     id      = aws_launch_template.nodes.id

@@ -64,6 +64,12 @@ variable "public_alb_enabled" {
   default     = true
 }
 
+variable "enable_s3_read_all" {
+  description = "Grant the app pod read-only listing and object-read access to all S3 buckets. Enable only in isolated pentest deployments."
+  type        = bool
+  default     = false
+}
+
 variable "alb_ingress_cidrs" {
   description = "IPv4 CIDRs allowed to reach the public application; independent of the EKS API allowlist."
   type        = set(string)

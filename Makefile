@@ -89,6 +89,8 @@ k8s-up: ## Install/upgrade the Helm chart (GHCR image + DynamoDB Local) on the c
 	$(call step,Deploying $(K8S_RELEASE) to $(K8S_CONTEXT)/$(K8S_NS))
 	$(HELM) upgrade --install $(K8S_RELEASE) charts/nebraska-app --create-namespace \
 		--wait --timeout 5m $(HELM_SEED) $(HELM_ARGS)
+	kubectl --context $(K8S_CONTEXT) label namespace $(K8S_NS) Application=Husker-Roster-App app.kubernetes.io/part-of=husker-roster-app --overwrite
+	kubectl --context $(K8S_CONTEXT) annotate namespace $(K8S_NS) Application=Husker-Roster-App app.kubernetes.io/part-of=husker-roster-app --overwrite
 	@$(MAKE) --no-print-directory k8s-status
 	@echo "Run 'make k8s-open' to browse http://localhost:$(K8S_PORT)"
 
@@ -127,7 +129,7 @@ EKS_PORT ?= 8082
 EKS_NS = $(shell $(EKS_TF) output -raw namespace)
 EKS_KUBECTL = kubectl --context $(EKS_CONTEXT) --namespace $(EKS_NS)
 
-.PHONY: eks-url eks-preflight eks-image eks-image-local eks-ecr-login api-traffic eks-traffic
+.PHONY: eks-url eks-preflight eks-image eks-image-local eks-ecr-login api-traffic eks-traffic security-validation
 
 API_URL ?=
 DURATION ?= 30
@@ -145,6 +147,20 @@ api-traffic: ## Generate bounded read-only API traffic (defaults to the EKS ALB 
 	fi; \
 	python3 scripts/api_traffic.py --url "$$url" --duration "$(DURATION)" --rate "$(RATE)" \
 		--workers "$(WORKERS)" --timeout "$(REQUEST_TIMEOUT)"
+
+security-validation: ## Run documented API security checks (MUTATIONS=1 opts into persistent writes)
+	@set -e; url="$(API_URL)"; \
+	if test -z "$$url"; then \
+		url="$$($(EKS_TF) output -raw app_url 2>/dev/null)" || { echo "Cannot resolve EKS URL; pass API_URL=http://your-app-host." >&2; exit 1; }; \
+	fi; \
+	if test -z "$$url" || test "$$url" = "null"; then \
+		echo "No public EKS URL; pass API_URL=http://localhost:8082 after port-forwarding." >&2; exit 1; \
+	fi; \
+	if test "$(MUTATIONS)" = "1"; then \
+		python3 scripts/security_validation.py --url "$$url" --timeout "$(REQUEST_TIMEOUT)" --include-mutations; \
+	else \
+		python3 scripts/security_validation.py --url "$$url" --timeout "$(REQUEST_TIMEOUT)"; \
+	fi
 
 eks-traffic: api-traffic ## Generate bounded API traffic against the EKS deployment
 
@@ -192,6 +208,8 @@ eks-app: eks-kubeconfig ## Install/upgrade the published image using generated E
 	@set -o pipefail; $(EKS_TF) output -raw helm_values | \
 		helm --kube-context $(EKS_CONTEXT) --namespace $(EKS_NS) upgrade --install nebraska-app charts/nebraska-app \
 		--create-namespace --wait --timeout 10m --values -
+	kubectl --context $(EKS_CONTEXT) label namespace $(EKS_NS) Application=Husker-Roster-App app.kubernetes.io/part-of=husker-roster-app --overwrite
+	kubectl --context $(EKS_CONTEXT) annotate namespace $(EKS_NS) Application=Husker-Roster-App app.kubernetes.io/part-of=husker-roster-app --overwrite
 	@$(MAKE) --no-print-directory eks-url
 
 eks-url: ## Print the EKS public ALB application URL

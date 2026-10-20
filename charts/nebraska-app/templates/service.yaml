@@ -4,6 +4,8 @@ metadata:
   name: {{ include "nebraska-app.fullname" . }}
   labels:
     {{- include "nebraska-app.labels" . | nindent 4 }}
+  annotations:
+    {{- include "nebraska-app.annotations" . | nindent 4 }}
 spec:
   type: {{ .Values.service.type }}
   selector:
@@ -24,6 +26,8 @@ metadata:
   name: {{ include "nebraska-app.fullname" . }}
   labels:
     {{- include "nebraska-app.labels" . | nindent 4 }}
+  annotations:
+    {{- include "nebraska-app.annotations" . | nindent 4 }}
 spec:
   {{- with .Values.ingress.className }}
   ingressClassName: {{ . }}
