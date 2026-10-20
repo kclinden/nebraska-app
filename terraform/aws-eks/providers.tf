@@ -19,7 +19,7 @@ provider "aws" {
   default_tags {
     tags = {
       Environment = "Testing"
-      Application = var.cluster_name
+      Application = "Husker-Roster-App"
     }
   }
 }

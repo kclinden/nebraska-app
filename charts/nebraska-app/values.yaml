@@ -4,6 +4,8 @@ image:
   # Always re-check :latest; use IfNotPresent/Never with a locally built tag.
   pullPolicy: Always
 
+applicationName: Husker-Roster-App
+
 replicaCount: 1
 
 sportsData:

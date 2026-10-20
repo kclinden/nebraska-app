@@ -84,10 +84,39 @@ resource "aws_iam_role_policy" "app" {
   })
 }
 
+resource "aws_iam_role_policy" "app_s3_read_all" {
+  count = var.enable_s3_read_all ? 1 : 0
+  name  = "${var.cluster_name}-s3-read-all"
+  role  = aws_iam_role.app.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ListBuckets"
+        Effect   = "Allow"
+        Action   = ["s3:ListAllMyBuckets"]
+        Resource = "*"
+      },
+      {
+        Sid      = "ListBucketContents"
+        Effect   = "Allow"
+        Action   = ["s3:GetBucketLocation", "s3:ListBucket"]
+        Resource = "arn:${data.aws_partition.current.partition}:s3:::*"
+      },
+      {
+        Sid      = "ReadBucketObjects"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "arn:${data.aws_partition.current.partition}:s3:::*/*"
+      }
+    ]
+  })
+}
+
 resource "aws_eks_pod_identity_association" "app" {
   cluster_name    = aws_eks_cluster.main.name
   namespace       = var.namespace
   service_account = "nebraska-app"
   role_arn        = aws_iam_role.app.arn
-  depends_on      = [aws_eks_addon.pod_identity, aws_iam_role_policy.app]
+  depends_on      = [aws_eks_addon.pod_identity, aws_iam_role_policy.app, aws_iam_role_policy.app_s3_read_all]
 }

@@ -208,7 +208,7 @@ ordinary app HTTP endpoints:
 | AWS ECS | App task role: `s3:*` on `*` | [AWS IAM](../terraform/aws/iam.tf) |
 | Azure | App managed identity: Storage Blob Data Owner at subscription scope | [Azure IAM](../terraform/azure/iam.tf) |
 | GCP | Runtime service account: project-wide `roles/storage.admin` | [GCP IAM](../terraform/gcp/iam.tf) |
-| AWS EKS | No corresponding broad storage grant; app role is scoped to three DynamoDB tables | [EKS IAM](../terraform/aws-eks/db.tf) |
+| AWS EKS | App role is scoped to three DynamoDB tables by default; `enable_s3_read_all` opts into read-only listing and object access across S3 buckets | [EKS IAM](../terraform/aws-eks/db.tf) |
 
 Validate these through IAM/RBAC policy inspection or a scanner using the actual
 runtime identity. Calling a cloud CLI as your administrator proves your own

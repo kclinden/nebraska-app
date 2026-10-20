@@ -35,6 +35,21 @@ run "isolated_eks_stack" {
   }
 
   assert {
+    condition     = aws_eks_node_group.main.labels["Application"] == "Husker-Roster-App" && aws_eks_node_group.main.labels["app.kubernetes.io/part-of"] == "husker-roster-app"
+    error_message = "EKS worker nodes must carry the shared application identity labels."
+  }
+
+  assert {
+    condition     = alltrue([for specification in aws_launch_template.nodes.tag_specifications : specification.tags["Application"] == "Husker-Roster-App"])
+    error_message = "EKS worker instances and volumes must carry the shared AWS application tag."
+  }
+
+  assert {
+    condition     = length(aws_iam_role_policy.app_s3_read_all) == 0
+    error_message = "Broad S3 read access must be disabled by default."
+  }
+
+  assert {
     condition     = aws_launch_template.nodes.metadata_options[0].http_tokens == "required" && aws_launch_template.nodes.metadata_options[0].http_put_response_hop_limit == 1
     error_message = "App pods must not fall back to the EC2 node credentials."
   }
@@ -58,6 +73,28 @@ run "private_access" {
   assert {
     condition     = length(aws_lb.app) == 0 && length(aws_autoscaling_attachment.app) == 0 && local.app_service.type == "ClusterIP"
     error_message = "Private mode must not provision a public ALB or NodePort."
+  }
+}
+
+run "s3_read_all_opt_in" {
+  command = plan
+  variables {
+    enable_s3_read_all = true
+  }
+
+  assert {
+    condition     = length(aws_iam_role_policy.app_s3_read_all) == 1
+    error_message = "Opting in must attach the S3 read policy to the app role."
+  }
+
+  assert {
+    condition     = jsondecode(aws_iam_role_policy.app_s3_read_all[0].policy).Statement[0].Action == ["s3:ListAllMyBuckets"] && jsondecode(aws_iam_role_policy.app_s3_read_all[0].policy).Statement[1].Action == ["s3:GetBucketLocation", "s3:ListBucket"] && jsondecode(aws_iam_role_policy.app_s3_read_all[0].policy).Statement[2].Action == ["s3:GetObject"]
+    error_message = "The opt-in S3 policy must allow only listing and object reads."
+  }
+
+  assert {
+    condition     = jsondecode(aws_iam_role_policy.app_s3_read_all[0].policy).Statement[1].Resource == "arn:aws:s3:::*" && jsondecode(aws_iam_role_policy.app_s3_read_all[0].policy).Statement[2].Resource == "arn:aws:s3:::*/*"
+    error_message = "The opt-in S3 read policy must cover bucket and object ARNs."
   }
 }
 
