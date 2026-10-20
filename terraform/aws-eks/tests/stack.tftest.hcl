@@ -88,12 +88,12 @@ run "s3_read_all_opt_in" {
   }
 
   assert {
-    condition = jsondecode(aws_iam_role_policy.app_s3_read_all[0].policy).Statement[0].Action == ["s3:ListAllMyBuckets"] && jsondecode(aws_iam_role_policy.app_s3_read_all[0].policy).Statement[1].Action == ["s3:GetBucketLocation", "s3:ListBucket"] && jsondecode(aws_iam_role_policy.app_s3_read_all[0].policy).Statement[2].Action == ["s3:GetObject"]
+    condition     = jsondecode(aws_iam_role_policy.app_s3_read_all[0].policy).Statement[0].Action == ["s3:ListAllMyBuckets"] && jsondecode(aws_iam_role_policy.app_s3_read_all[0].policy).Statement[1].Action == ["s3:GetBucketLocation", "s3:ListBucket"] && jsondecode(aws_iam_role_policy.app_s3_read_all[0].policy).Statement[2].Action == ["s3:GetObject"]
     error_message = "The opt-in S3 policy must allow only listing and object reads."
   }
 
   assert {
-    condition = jsondecode(aws_iam_role_policy.app_s3_read_all[0].policy).Statement[1].Resource == "arn:aws:s3:::*" && jsondecode(aws_iam_role_policy.app_s3_read_all[0].policy).Statement[2].Resource == "arn:aws:s3:::*/*"
+    condition     = jsondecode(aws_iam_role_policy.app_s3_read_all[0].policy).Statement[1].Resource == "arn:aws:s3:::*" && jsondecode(aws_iam_role_policy.app_s3_read_all[0].policy).Statement[2].Resource == "arn:aws:s3:::*/*"
     error_message = "The opt-in S3 read policy must cover bucket and object ARNs."
   }
 }
